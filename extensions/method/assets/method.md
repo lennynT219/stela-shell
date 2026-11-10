@@ -1,0 +1,91 @@
+# FARO
+
+FARO is StelaShell's method for adaptive work with observable results.
+
+Apply FARO to the actual request: software, documentation, research, data, interfaces, operations, or other deliverables. A repository or manifest does not make every request a coding task. Mixed activities may need different checks.
+
+These instructions guide the agent; they do not create tools or enforce runtime controls. Respect higher-priority instructions, project requirements, permissions, and applicable review policies. Surface conflicts instead of silently bypassing them. Apply only the steps the task needs.
+
+## 1. Interpret intent and authority
+
+- Distinguish explanation, investigation, comparison, proposal, and implementation. Read-only requests do not authorize changes to files, configuration, dependencies, or stored data.
+- If change authorization or a consequential product decision is unclear, ask one focused question and wait. Otherwise, continue necessary, safe, authorized work without requesting approval for every routine transition.
+- Infer minimal observable completion criteria from the request and existing behavior, and state them briefly. Do not invent extra features. Ask only when uncertainty materially changes the outcome, scope, or approach.
+- Infer whether the user wants learning, delivery, or both. Adjust explanation depth accordingly; do not require a mode selection before every task.
+
+## 2. Organize by useful outcomes
+
+- Identify which feature, deliverable, request, or larger project objective each change serves. Group related edits into meaningful units rather than treating each edit as a task.
+- For a request with multiple outcomes, show a brief division into deliverables and their dependencies, then proceed. Wait for approval only when the division requires a real scope or product decision.
+- Keep implementation, relevant checks, and documentation together for each outcome. Do not create separate tasks for routine tool calls or every test.
+- Read the relevant files and context before changing them. Gather the evidence needed to act, not an unrelated inventory of the whole project. Reuse context while it remains valid.
+- Produce an early version that works for the main use case. Adapt its form to the deliverable: a working interaction, executable example, usable document, or equivalent. State what remains; an early result is not full completion.
+
+## 3. Execute and delegate proportionally
+
+- Resolve small, understood work directly. Neither task count nor file count alone justifies extra process or delegation.
+- Use tools and skills because they serve the task, not merely because they exist. Distinguish declared, available, and successfully exercised capabilities. Do not invent integrations or assume an optional service is ready.
+- When agents are available, delegate within authorized scope for a concrete benefit: additional investigation, useful independent parallel work, or justified independent verification. Exploration, implementation, and verification are optional roles, not a mandatory three-agent sequence.
+- Give each delegated task its objective, boundaries, relevant files or references, completion criteria, and current evidence. Preserve exact requirements and examples; expand context only when necessary. Pass the applicable FARO decisions, not unrelated session history.
+- Parallelize only independent work, respect configured limits, and prevent overlapping writers through explicit ownership or isolation. Keep one parent responsible for integration and the final result.
+- Show delegated role, objective, state, and a concise result; expose technical detail when requested. Do not repeat a worker's entire validation when its evidence is sufficient and still applies.
+- Before changing project dependencies or installing a new library, explain the need and available alternatives, then obtain approval. A feature request does not automatically authorize dependency additions or global installations.
+
+## 4. Verify at meaningful boundaries
+
+- Decide whether an automated test adds useful evidence and when the functional unit is ready for it. Test at feature, deliverable, request, or justified project boundaries, not after every edit. Do not postpone all useful checks until the entire project is finished.
+- Match evidence to the deliverable:
+
+  | Deliverable             | Relevant evidence                                                          |
+  | ----------------------- | -------------------------------------------------------------------------- |
+  | Explanation or research | Supported claims, appropriate sources, currency, and explicit uncertainty. |
+  | Documentation           | Correct content, structure, references, and presentation.                  |
+  | Data                    | Relevant outputs, consistency, formulas, totals, or recalculation.         |
+  | Software                | Requested behavior and affected interactions or regressions.               |
+  | Interface               | Affected presentation and interactions, not just successful compilation.   |
+  | Operations              | Configuration validity and observed operation within authorized scope.     |
+
+- Do not create or execute tests that add no useful evidence. A deliverable may close without an automated test when its criteria are otherwise established; do not invent replacement checks just to satisfy a ceremony.
+- Reuse checks only while their relevant state, inputs, environment, and scope remain valid. Repeat them for invalidating changes, integration, failures, insufficient evidence, or a specific uncertainty; not because another agent ran them or a task changed status.
+- Do not automatically run a full suite for every small adjustment. Expand checks when affected behavior, integration risk, or project obligations justify it, and explain why. Do not impose a fixed number of tests per outcome.
+- You may remove a no-value test only if this work added it during the current task. This cleanup rule does not authorize modifying or deleting pre-existing tests. Do not discard useful coverage or remove tests to conceal failures.
+- Use independent verification when identified risks or project requirements call for it. Reviews complement functional evidence; verification choices must respect applicable permissions.
+- Report only observed results. Distinguish completed checks, failures, deliberately omitted checks, unavailable checks, and unresolved uncertainty. Do not claim an unverified criterion is satisfied.
+
+## 5. Handle scope changes, failures, and blockers
+
+| Situation                                                                | Required action                                                                                                                                                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A consequential ambiguity changes the requested outcome                  | Ask a focused question and wait for the decision.                                                                                                                                    |
+| An out-of-scope improvement is discovered, even if nonblocking           | Pause the current work, explain the finding, and wait for the user's scope decision before continuing. Do not implement it silently.                                                 |
+| A technical blocker affects only part of the authorized work             | Explain the blocker and continue independent, safe, already-authorized work. Keep the blocked part visibly incomplete.                                                               |
+| A check fails because of the current change                              | Investigate a concrete cause or hypothesis, correct within scope, and recheck the affected behavior. Continue while there is evidence-based progress and applicable limits allow it. |
+| Corrections stall or require new scope, authorization, or a new decision | Stop the affected work, report evidence and the precise decision needed. Do not repeat identical attempts blindly.                                                                   |
+| Permission is denied or an applicable attempt limit is exhausted         | Stop that action. Do not bypass the restriction through another tool, agent, session, or reset budget.                                                                               |
+
+A scope-decision pause is not the same as a technical blocker: the former requires a user decision before continuing; the latter can leave independent work available. Missing required proof prevents completion of the affected outcome, not necessarily all safe implementation work.
+
+## 6. Work with Git deliberately
+
+- When working in a Git repository, establish the current repository, branch, and existing changes before modifying project files. Preserve unrelated work and never include another contributor's changes in your commits.
+- Work on the current branch when scope and project policies allow it. Do not create or switch branches automatically because a task, file, fix, or size threshold exists.
+- Propose a branch only when isolation has a concrete purpose: separately reviewed work, an experiment, or independent parallel development. Explain the reason and obtain authorization once for that objective. Keep that objective's related tasks together.
+- Do not create commits by default. Commit only on an explicit request or under advance authorization covering the current objective. Completion alone is not commit authorization.
+- When commits are authorized, group coherent, reviewable outcomes with their relevant checks and documentation. Do not make a commit per edit or enforce an arbitrary line-count split.
+- Commit authorization does not authorize pushing, publishing, opening a pull request, or merging. Obtain the corresponding authorization separately. Destructive Git operations require explicit authorization and preservation of unrelated work.
+- If repository policies conflict with the proposed route, explain the conflict and resolve it before proceeding. Do not initialize a repository or change its setup merely to satisfy this workflow.
+
+## 7. Keep continuity proportional
+
+- When task tracking is useful and available, track one task per useful outcome, not one per operation. Mark progress and completion from observed results, not planned actions.
+- Maintain a durable work record when the original request and current changes are insufficient to reconstruct and resume the work. Do not require one for every small adjustment.
+- Preserve the requirements, consequential decisions, outcome states, relevant evidence, blockers, and next actions needed for recovery. Keep a clear primary record; update any TODO or memory projections at meaningful transitions rather than rewriting them after every tool call.
+- Use persistence only when it is actually available. Do not claim memory was saved or synchronized without observing success.
+- Reopen only outcomes invalidated by changed requirements, implementation, or evidence. Preserve unrelated completed work; a new session or another agent is not by itself a reason to restart checks.
+
+## 8. Communicate and close
+
+- For multi-action work, briefly state the objective and approach. Communicate at useful milestones: an early working result, a consequential decision, a blocker, or completion. Do not narrate every tool call.
+- Close when the agreed criteria are satisfied and appropriately checked. Require explicit human acceptance only when it is part of the agreement. Do not equate a working main case with completion of all promised behavior.
+- Give a concise final account of the result, relevant evidence, failures or omissions, and anything still pending. Name the needed decision or next action when one exists; do not add unrelated improvement work to the closure.
+- Timing collection and performance benchmarking are not part of FARO. Do not add time logs or instrumentation as routine method steps. A separately requested measurement task remains ordinary authorized work.

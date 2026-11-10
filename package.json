@@ -1,0 +1,12 @@
+{
+  "name": "stela-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StelaShell es una integracion para PI coding agent",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extensions/method/index.ts"
+    ]
+  }
+}
