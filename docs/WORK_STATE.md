@@ -18,6 +18,7 @@ Deliver the user-accepted first version of project continuity in StelaShell. The
 - Completed: `method.md` consolidates resource-specific authority in section 1 and continuity selection, immediate recording of explicit decisions, the described five-section template, and maintenance and delivery rules in section 7. The duplicate save-confirmation instruction was merged into the pre-final delivery rule.
 - Completed: the current `index.ts` loads FARO and provides recovery reminders without an `agent_before_settle` continuation. It was not changed for the structure update.
 - Accepted: the user approved this implementation as version 1. Live model adherence to selective persistence remains an observational limitation, not an automated guarantee or a blocker to the authorized publication.
+- Publication blocked: the version 1 commit exists locally, but GitHub rejected the push to `origin/main` with `Permission denied (publickey)`. No alternate transport, credential changes, or additional push attempts were made.
 
 ## Relevant evidence
 
@@ -27,6 +28,6 @@ Deliver the user-accepted first version of project continuity in StelaShell. The
 
 ## Next actions and open questions
 
-- No additional implementation is required for the accepted first version. Git history and the remote branch are the source of publication status.
+- No additional implementation is required for the accepted first version. Restore authorized SSH access to the configured GitHub remote before retrying publication. The denied push action is stopped; do not bypass the restriction with another transport or identity. Git history and the remote branch are the source of commit and synchronization status.
 - Future validation may observe selective persistence, confirmation updates, and resource-specific permissions in live interactions. Further implementation changes require their own authorized scope.
 - If the obsolete post-response review reminder persists after reload, its emitting extension or instance remains an open diagnostic question; investigation is outside the accepted version's implementation scope.
