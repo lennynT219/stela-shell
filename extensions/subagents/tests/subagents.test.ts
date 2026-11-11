@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { TaskQueue, concurrencyLimit, validateAssignment, type Assignment } from "../tasks.ts";
 import { CHILD_MARKER, CHILD_SCOPE, READY_ENTRY, BLOCKED_ENTRY, RESULT_BYTES, boundedText, childArguments, makeScope, pathInScope, resolveLaunch, runChild, type RunOptions, type RunResult } from "../runner.ts";
 import { registerSubagents, formatResult } from "../index.ts";
+import faroMethod from "../../method/index.ts";
 
 const fixture = fileURLToPath(new URL("./fixtures/pi-child.mjs", import.meta.url));
 const assignment: Assignment = { label: "Contract evidence", objective: "Find the contract", references: [fixture], context: "Known facts", constraints: ["Read only"], done_when: "Return evidence and limitations" };
@@ -64,6 +65,38 @@ function harness() {
   return { pi, ctx, hooks, tools, flags, commands, entries, branch, widgets, notifications, available, emit, controller };
 }
 const fakeLaunch = () => ({ command: "unused", prefix: [], resourceArgs: [] });
+
+test("FARO delegation instructions reach the parent tool and bounded helper role", async () => {
+  const h = harness();
+  faroMethod(h.pi);
+  registerSubagents(h.pi, { env: {} });
+  const base = "Existing host permissions and instructions.";
+  const method = readFileSync(new URL("../../method/assets/method.md", import.meta.url), "utf8").trim();
+  const event = { systemPrompt: base };
+  const injected = await h.emit("before_agent_start", event);
+  assert.equal(injected.systemPrompt, `${base}\n\n${method}`);
+  assert.equal(event.systemPrompt, base);
+  assert.match(injected.systemPrompt, /without waiting for the user to request subagents/);
+  assert.match(injected.systemPrompt, /When `stela_delegate` is available/);
+
+  const delegate = h.tools.get("stela_delegate");
+  assert.equal(delegate.exposure, "model-only");
+  const guidelines = delegate.promptGuidelines.join("\n");
+  assert.match(guidelines, /Follow FARO: proactively use stela_delegate/);
+  assert.match(guidelines, /Do not wait for the user to mention delegation/);
+  assert.match(guidelines, /resolve small, straightforward questions directly/);
+  assert.match(guidelines, /Never delegate denied actions, broaden access/);
+
+  const args = childArguments(options());
+  const helperIndex = args.lastIndexOf("--append-system-prompt");
+  assert.ok(helperIndex >= 0);
+  assert.equal(args[helperIndex + 1], fileURLToPath(new URL("../assets/helper.md", import.meta.url)));
+  const helper = readFileSync(args[helperIndex + 1], "utf8");
+  assert.match(helper, /Apply FARO proportionately within this child role/);
+  assert.match(helper, /The parent decides when to delegate; you do not orchestrate or delegate again/);
+  assert.match(helper, /never expands the user's authorization or your read-only limits/);
+  assert.match(helper, /return a partial or blocked result instead of attempting it/);
+});
 
 test("assignment validation keeps the bounded contract and rejects authority/configuration injection", () => {
   assert.deepEqual(validateAssignment(assignment), assignment);

@@ -185,8 +185,8 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     description: "Start a bounded, read-only evidence assignment without waiting. Returns a task ID, not an answer. Results arrive automatically at parent turn boundaries (8 KiB answer maximum). No recursive delegation.",
     promptSnippet: "Delegate an independent evidence question to stela-helper",
     promptGuidelines: [
-      "Use stela_delegate only when isolated reasoning has a clear benefit over direct work or a tool call. Prefer independent work that can overlap useful parent work.",
-      "Give stela_delegate the objective, minimal context, authorized existing reference paths, applicable restrictions and an observable completion criterion. Never delegate denied actions or broaden access.",
+      "Follow FARO: proactively use stela_delegate for bounded, independent read-only evidence questions when isolated reasoning has a clear benefit over direct work or a tool call. Do not wait for the user to mention delegation. Prefer work that can overlap useful parent work; resolve small, straightforward questions directly.",
+      "Give stela_delegate the objective, minimal context, authorized existing reference paths, applicable restrictions and an observable completion criterion. Routine delegation inside the already authorized task needs no separate approval unless the user or an applicable policy requires it. Never delegate denied actions, broaden access, or assign writing, shell execution, tests, continuity updates or recursive delegation to stela-helper.",
       "After stela_delegate, continue independent work. Do not poll, sleep, duplicate an active assignment, or inspect the same evidence without a distinct reason. If nothing independent remains, report that the result is pending; the host waits without extra model calls.",
       "Do not claim final completion while a required stela_delegate result is pending. Integrate its evidence and limitations; process success is not requirement verification. Use stela_cancel when an assignment is no longer relevant.",
     ],

@@ -23,7 +23,9 @@ The method extension supplies instructions; it does not enforce permissions, Git
 
 ## Subagent core
 
-StelaShell delegates **bounded evidence questions**, not mandatory explore/implement/verify stages. The parent should use tools directly for simple retrieval and delegate only when isolated reasoning has a concrete benefit, preferably alongside useful independent work.
+StelaShell delegates **bounded evidence questions**, not mandatory explore/implement/verify stages. FARO instructs the parent to initiate useful delegation within the authorized task without waiting for the user to mention subagents. Routine delegation within that scope needs no separate approval unless the user or an applicable policy requires it. The parent should use tools directly for simple retrieval and delegate only when isolated reasoning has a concrete benefit, preferably alongside useful independent work.
+
+The roles are distinct: `stela_delegate` dispatches work; `stela-helper` answers one read-only evidence question and cannot orchestrate or delegate again. The parent retains implementation, command execution where authorized, continuity and integration. This is model-guided initiative within a user task, not an automatic background scheduler or a guarantee that every model will choose delegation correctly. FARO defines the decision policy; the registered tool guidelines define asynchronous use, and the helper contract bounds the child's role.
 
 - `stela_delegate` accepts `label`, `objective`, existing authorized `references`, optional `context` and `constraints`, and `done_when`. It returns a task ID immediately, not a completed answer. Each reference is a file or directory that bounds the child's reader paths.
 - `stela_cancel` accepts `task_id`. Queued cancellation prevents launch; running cancellation holds its concurrency slot until the process finishes cleanup.
