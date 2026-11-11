@@ -8,6 +8,7 @@ export interface Assignment {
   context: string;
   constraints: string[];
   done_when: string;
+  timeout_seconds?: number;
 }
 
 export type TaskState = "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
@@ -21,13 +22,22 @@ export interface Task {
 }
 
 export const MAX_PENDING = 8;
+export const DEFAULT_TIMEOUT_SECONDS = 120;
+export const MAX_TIMEOUT_SECONDS = 300;
 const MAX_HISTORY = 32;
+
+export function executionTimeoutSeconds(value: unknown = DEFAULT_TIMEOUT_SECONDS): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < DEFAULT_TIMEOUT_SECONDS || value > MAX_TIMEOUT_SECONDS) {
+    throw new Error(`timeout_seconds must be an integer from ${DEFAULT_TIMEOUT_SECONDS} to ${MAX_TIMEOUT_SECONDS}.`);
+  }
+  return value;
+}
 
 /** Revalidate at execution time: other Pi hooks may have changed tool arguments. */
 export function validateAssignment(value: unknown): Assignment {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected an assignment object.");
   const input = value as Record<string, unknown>;
-  const keys = ["label", "objective", "references", "context", "constraints", "done_when"];
+  const keys = ["label", "objective", "references", "context", "constraints", "done_when", "timeout_seconds"];
   if (Object.keys(input).some((key) => !keys.includes(key))) throw new Error("Unknown assignment field.");
   const string = (value: unknown, name: string, max: number, empty = false): string => {
     if (typeof value !== "string" || (!empty && !value.trim()) || /\u0000/.test(value) || Buffer.byteLength(value) > max) {
@@ -46,6 +56,7 @@ export function validateAssignment(value: unknown): Assignment {
     context: string(input.context ?? "", "context", 8192, true),
     constraints: list(input.constraints ?? [], "constraints", 1024),
     done_when: string(input.done_when, "done_when", 2048),
+    timeout_seconds: executionTimeoutSeconds(input.timeout_seconds),
   };
   if (/[\p{Cc}\p{Cf}]/u.test(assignment.label)) throw new Error("The label must be plain single-line text.");
   if (!assignment.references.length) throw new Error("Name at least one authorized file or directory in references.");
@@ -88,7 +99,8 @@ export class TaskQueue {
 
   enqueue(assignment: Assignment, scopeKey: string, execute: Entry["execute"]): { task: Task; duplicate: boolean } {
     if (this.closed) throw new Error("This task queue is closed.");
-    const { label: _label, ...meaning } = assignment;
+    const { label: _label, timeout_seconds: _budget, ...meaning } = assignment;
+    // An active question keeps its original budget; changing it cannot extend or duplicate that work.
     // Exact normalized duplicates only; semantic equivalence is the parent's responsibility.
     const key = JSON.stringify([scopeKey, { ...meaning, references: [...meaning.references].sort(), constraints: [...meaning.constraints].sort() }]);
     const duplicate = [...this.entries.values()].find((entry) => entry.key === key && ["queued", "running", "cancelling"].includes(entry.task.state));

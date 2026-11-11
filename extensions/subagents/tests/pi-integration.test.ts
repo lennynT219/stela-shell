@@ -46,6 +46,7 @@ for (const action of ["read", "write", "permission-denied"]) {
       const receipt = events.find((event) => event.type === "tool_execution_end" && event.toolName === "stela_delegate");
       assert.ok(receipt, stdout + stderr);
       assert.equal(receipt.isError, false, JSON.stringify(receipt));
+      assert.equal(receipt.result.details.timeoutSeconds, action === "read" ? 300 : 120, "native admission must preserve the selected budget and normalize omission");
       const results = events.filter((event) => event.type === "entry_appended" && event.entry?.customType === "stela-subagent-result");
       // Observe the native boundary commit and its subsequent model-facing projection.
       const integrated = events.filter((event) => event.type === "message_end" && event.message?.role === "assistant").flatMap((event) => event.message.content).filter((part) => part.type === "text" && part.text.startsWith("INTEGRATED"));

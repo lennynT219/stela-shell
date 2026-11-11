@@ -22,6 +22,54 @@ if (scenario === "success") {
   settle();
 } else if (scenario === "large") {
   answer("stop", [{ type: "text", text: "evidence ".repeat(4000) }]); settle();
+} else if (scenario === "ranges") {
+  for (const args of [
+    { path: "/fixture/source.ts", offset: 1, limit: 200, content: "DO_NOT_RETAIN_CONTENT" },
+    { path: "/fixture/source.ts", offset: 201, limit: 80 },
+    { path: "/fixture/source.ts" },
+    { path: "/fixture/source.ts", offset: null, limit: "DO_NOT_RETAIN_CONTENT" },
+    { path: `/fixture/${"x".repeat(500)}`, offset: 42, limit: 7 },
+  ]) emit({ type: "tool_execution_start", toolName: "read", args });
+  answer(); settle();
+} else if (scenario.startsWith("stream-")) {
+  answer("toolUse", [{ type: "text", text: "Earlier public evidence" }]);
+  emit({ type: "message_start", message: { role: "assistant", content: [], stopReason: "pending" } });
+  const update = (type, fields) => emit({ type: "message_update", assistantMessageEvent: { type, ...fields, partial: { content: [{ type: "text", text: "PRIVATE_SNAPSHOT_DO_NOT_RETAIN" }] } } });
+  update("thinking_delta", { contentIndex: 1, delta: "PRIVATE_REASONING_DO_NOT_RETAIN" });
+  update("toolcall_delta", { contentIndex: 3, delta: "PRIVATE_PAYLOAD_DO_NOT_RETAIN" });
+  if (scenario !== "stream-thinking-hang") {
+    update("text_delta", { contentIndex: 0, delta: "Stream A" });
+    update("text_end", { contentIndex: 0, content: "Stream corrected ñ🙂" });
+    update("text_delta", { contentIndex: 2, delta: "Second block" });
+    if (scenario === "stream-large-hang") update("text_delta", { contentIndex: 2, delta: "ñ🙂 public ".repeat(3000) });
+  }
+  if (scenario === "stream-empty-final") { answer("stop", []); settle(); }
+  else if (scenario === "stream-valid-final") { answer(); settle(); }
+  else {
+    process.on("SIGTERM", () => {});
+    setInterval(() => {}, 1000);
+  }
+} else if (scenario.startsWith("partial-")) {
+  emit({ type: "tool_execution_start", toolName: "read", args: { path: "/fixture/source.ts", offset: 1, limit: 200 } });
+  answer("toolUse", [{ type: "text", text: "Older public text A" }]);
+  answer("toolUse", [
+    { type: "thinking", thinking: "PRIVATE_REASONING_DO_NOT_RETAIN" },
+    { type: "text", text: scenario === "partial-large-hang" ? "ñ🙂 evidence ".repeat(2000) : "Partial evidence B: ñ🙂" },
+    { type: "toolCall", name: "read", arguments: { path: "PRIVATE_PAYLOAD_DO_NOT_RETAIN" } },
+  ]);
+  answer("toolUse", []);
+  answer("toolUse", [{ type: "text", text: " \n\t " }]);
+  answer("toolUse", [{ type: "toolCall", name: "read", arguments: { path: "PRIVATE_PAYLOAD_DO_NOT_RETAIN" } }]);
+  if (scenario === "partial-empty-final") { answer("stop", []); settle(); }
+  else if (scenario === "partial-spaces-final") { answer("stop", [{ type: "text", text: " \n\t " }]); settle(); }
+  else if (scenario === "partial-thinking-final") { answer("stop", [{ type: "thinking", thinking: "PRIVATE_REASONING_DO_NOT_RETAIN" }]); settle(); }
+  else if (scenario === "partial-valid-final") { answer(); settle(); }
+  else if (scenario === "partial-restarted") {
+    answer(); settle(); emit({ type: "agent_start" }); settle();
+  } else {
+    if (scenario === "partial-ignore-term") process.on("SIGTERM", () => {});
+    setInterval(() => {}, 1000);
+  }
 } else if (scenario === "malformed") process.stdout.write("not JSON\n");
 else if (scenario === "oversized-frame") process.stdout.write("x".repeat(1024 * 1024 + 1));
 else if (scenario === "unterminated") process.stdout.write('{"type":"agent_settled"}');

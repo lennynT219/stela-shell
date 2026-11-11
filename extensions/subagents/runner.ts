@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
-import type { Assignment } from "./tasks.ts";
+import { executionTimeoutSeconds, type Assignment } from "./tasks.ts";
 import { spawnManaged, type ManagedProcess } from "./processes.ts";
 
 export const CHILD_MARKER = "STELA_SUBAGENT_CHILD";
@@ -26,6 +26,7 @@ export interface RunOptions {
   trusted: boolean;
   signal: AbortSignal;
   env?: NodeJS.ProcessEnv;
+  /** Internal test seam: may shorten, never extend, the assignment's hard budget. */
   timeoutMs?: number;
   killGraceMs?: number;
 }
@@ -123,12 +124,27 @@ export function childArguments(options: RunOptions): string[] {
 export async function runChild(options: RunOptions): Promise<RunResult> {
   const result: RunResult = { status: "failed", output: "", diagnostics: "", trace: [], truncated: false };
   if (options.signal.aborted) return { ...result, status: "cancelled", error: "Cancelled before launch." };
+  let timeoutMs: number;
+  try {
+    const budgetMs = executionTimeoutSeconds(options.assignment.timeout_seconds) * 1000;
+    timeoutMs = options.timeoutMs ?? budgetMs;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > budgetMs) {
+      throw new Error("Invalid execution timeout: it must be a positive integer no greater than the assignment budget in milliseconds.");
+    }
+  } catch (error) {
+    return { ...result, error: error instanceof Error ? error.message : "Invalid execution budget." };
+  }
   return new Promise((resolveResult) => {
     let managed: ManagedProcess;
     let child: ManagedProcess["child"];
     let ready = false;
     let settled = false;
     let stopReason: string | undefined;
+    let hasFinalAnswer = false;
+    let streaming = false;
+    let streamCapped = false;
+    let streamBytes = 0;
+    const streamBlocks = new Map<number, string>();
     let completed = false;
     let stopping = false;
     let reason: string | undefined;
@@ -160,10 +176,23 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
       clearTimeout(deadline); clearTimeout(killTimer); clearTimeout(shutdownDeadline);
       options.signal.removeEventListener("abort", abort);
       if (options.signal.aborted) result.status = "cancelled";
-      else if (reason || code !== 0 || signal || !ready || !settled || stopReason !== "stop" || !result.output.trim()) result.status = "failed";
+      else if (reason || code !== 0 || signal || !ready || !settled || !hasFinalAnswer) result.status = "failed";
       else result.status = "completed";
-      if (result.status !== "completed") result.error = boundedText(reason ?? (signal ? `Child terminated by ${signal}.` : code !== 0 ? `Child exited with code ${code}.` : !ready ? "Child read-only guard did not initialize." : !settled ? "Child exited without agent_settled." : `Incomplete child response (${stopReason ?? "no assistant output"}).`), 1024);
+      if (result.status !== "completed") result.error = boundedText(reason ?? (signal ? `Child terminated by ${signal}.` : code !== 0 ? `Child exited with code ${code}.` : !ready ? "Child read-only guard did not initialize." : !settled ? "Child exited without agent_settled." : `Incomplete child response (${stopReason ?? "no assistant output"}); a nonempty final answer is required.`), 1024);
       resolveResult(result);
+    };
+    const retainPublicText = (output: string): boolean => {
+      const text = boundedText(output, RESULT_BYTES);
+      if (!text.trim()) return false;
+      result.output = text;
+      result.truncated = Buffer.byteLength(output) > RESULT_BYTES;
+      return true;
+    };
+    const resetStream = (active: boolean) => {
+      streaming = active;
+      streamCapped = false;
+      streamBytes = 0;
+      streamBlocks.clear();
     };
     const frame = (line: string) => {
       if (!line.trim() || stopping) return;
@@ -174,19 +203,55 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
       if (event.type === "entry_appended" && event.entry?.customType === BLOCKED_ENTRY) stop("Child attempted a disallowed operation or exceeded its work budget.");
       if (event.type === "agent_start") {
         settled = false;
+        hasFinalAnswer = false;
+        stopReason = undefined;
+        resetStream(false);
         if (!ready) stop("Child started without the read-only guard.");
+      }
+      if (event.type === "message_start" && event.message?.role === "assistant") {
+        hasFinalAnswer = false;
+        resetStream(true);
+      }
+      if (event.type === "message_update" && streaming && !streamCapped) {
+        // JSON mode sends deltas, not the SDK's cumulative message snapshots.
+        // Store only public text blocks; never buffer thinking or tool-call arguments.
+        const update = event.assistantMessageEvent;
+        const index = update?.contentIndex;
+        if (Number.isSafeInteger(index) && index >= 0 && ["text_delta", "text_end"].includes(update.type)) {
+          const incoming = update.type === "text_delta" ? update.delta : update.content;
+          if (typeof incoming === "string") {
+            const previous = streamBlocks.get(index) ?? "";
+            const next = update.type === "text_delta" ? previous + incoming : incoming;
+            // Four extra bytes allow one complete UTF-8 code point past the output cap,
+            // so boundedText can mark truncation without retaining an unbounded stream.
+            const available = RESULT_BYTES + 4 - (streamBytes - Buffer.byteLength(previous));
+            const prefix = new TextDecoder().decode(Buffer.from(next).subarray(0, available), { stream: true });
+            if (prefix) streamBlocks.set(index, prefix); else streamBlocks.delete(index);
+            streamBytes += Buffer.byteLength(prefix) - Buffer.byteLength(previous);
+            const text = [...streamBlocks].sort(([a], [b]) => a - b).map(([, block]) => block).join("\n");
+            retainPublicText(text);
+            streamCapped = streamBytes > RESULT_BYTES || Buffer.byteLength(text) > RESULT_BYTES || Buffer.byteLength(next) > available;
+            if (streamCapped && result.output) result.truncated = true;
+          }
+        }
       }
       if (event.type === "tool_execution_start") {
         if (!options.scope.tools.includes(event.toolName)) { stop("Unexpected child tool execution."); return; }
         const detail = typeof event.args?.path === "string" ? ` ${event.args.path}` : "";
-        if (result.trace.length < 32) result.trace.push(boundedText(`${event.toolName}${detail}`, 256));
+        const ranges = event.toolName === "read" ? ["offset", "limit"]
+          .filter((key) => Number.isSafeInteger(event.args?.[key]))
+          .map((key) => ` ${key}=${event.args[key]}`).join("") : "";
+        if (result.trace.length < 32) result.trace.push(`${boundedText(`${event.toolName}${detail}`, 256 - Buffer.byteLength(ranges))}${ranges}`);
       }
       if (event.type === "message_end" && event.message?.role === "assistant") {
         const message = event.message;
         stopReason = message.stopReason;
+        // Retain only already emitted public text, never thinking or tool-call payloads.
+        // Empty/tool-only messages cannot erase a partial, nor make it a valid final answer.
         const output = Array.isArray(message.content) ? message.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n") : "";
-        result.truncated = Buffer.byteLength(output) > RESULT_BYTES;
-        result.output = boundedText(output, RESULT_BYTES);
+        const hasText = retainPublicText(output);
+        hasFinalAnswer = stopReason === "stop" && hasText;
+        resetStream(false);
         if (typeof message.errorMessage === "string") result.diagnostics = boundedText(message.errorMessage, 2048);
       }
       if (event.type === "agent_settled") {
@@ -233,9 +298,9 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
     });
     child.stdin!.on("error", (error) => stop(`Could not send assignment: ${error.message}`));
     // Piped input avoids command-line prompt interpolation and temporary prompt files.
-    child.stdin!.end(`Resolve this bounded assignment. Its references are the only authorized read surfaces.\n${JSON.stringify(options.assignment)}\n`);
+    child.stdin!.end(`Resolve this bounded assignment. Its references are the only authorized read surfaces.\nExecution budget: ${timeoutMs / 1000} seconds (hard deadline; no automatic extension).\n${JSON.stringify(options.assignment)}\n`);
     options.signal.addEventListener("abort", abort, { once: true });
-    deadline = setTimeout(() => stop("Child exceeded its 120-second execution deadline; no retry was started."), options.timeoutMs ?? 120_000);
+    deadline = setTimeout(() => stop(`Child exceeded its ${timeoutMs / 1000}-second execution deadline; no retry was started.`), timeoutMs);
     if (options.signal.aborted) abort();
   });
 }

@@ -26,6 +26,7 @@ export default function fixtureProvider(pi: ExtensionAPI) {
             content.push({ type: "toolCall", id: "fixture-read", name: writing ? "write" : "read", arguments: writing ? { path: "forbidden.txt", content: "must not be written" } : { path: "source.txt" } });
           } else content.push({ type: "toolCall", id: "fixture-delegate", name: "stela_delegate", arguments: {
             label: "Source evidence", objective: "Read source.txt and return its text as evidence", references: ["source.txt"], context: "", constraints: ["Read only"], done_when: "Return the observed evidence",
+            ...(process.env.STELA_FIXTURE_ACTION === "read" ? { timeout_seconds: 300 } : {}),
           } });
         } else if (child) {
           const read = context.messages.findLast((message) => message.role === "toolResult");

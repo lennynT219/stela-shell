@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { TaskQueue, concurrencyLimit, validateAssignment, type Task } from "./tasks.ts";
+import { TaskQueue, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, executionTimeoutSeconds, concurrencyLimit, validateAssignment, type Task } from "./tasks.ts";
 import {
   BLOCKED_ENTRY, CHILD_MARKER, CHILD_SCOPE, READY_ENTRY, READ_TOOLS,
   boundedText, makeScope, pathInScope, resolveLaunch, runChild,
@@ -18,6 +18,7 @@ const assignmentSchema = {
     context: { type: "string", maxLength: 8192 },
     constraints: { type: "array", maxItems: 16, items: { type: "string", minLength: 1, maxLength: 1024 } },
     done_when: { type: "string", minLength: 1, maxLength: 2048 },
+    timeout_seconds: { type: "integer", minimum: DEFAULT_TIMEOUT_SECONDS, maximum: MAX_TIMEOUT_SECONDS, default: DEFAULT_TIMEOUT_SECONDS, description: "Hard execution budget selected before launch (seconds). Omit for 120; increase up to 300 when justified. An active duplicate keeps its original budget; no automatic extension or retry." },
   },
 };
 
@@ -73,6 +74,12 @@ export function registerChildGuard(pi: ExtensionAPI, rawScope: string | undefine
   pi.on("user_bash", () => ({ result: { output: "Shell execution is disabled for stela-helper.", exitCode: 1, cancelled: true, truncated: false } }));
 }
 
+function partialEvidenceWarning(result: RunResult): string {
+  return result.status !== "completed" && result.output.trim()
+    ? "Partial evidence only: execution failed or was cancelled. This retained text is not a completed or verified answer."
+    : "";
+}
+
 export function formatResult(task: Task): string {
   const result = task.result!;
   return [
@@ -81,6 +88,7 @@ export function formatResult(task: Task): string {
     task.sourcesMayHaveChanged ? "Source warning: the parent ran a potentially mutating tool while this result was outstanding. Check relevance before relying on it." : "Source warning: this is evidence from a live workspace, not a filesystem snapshot.",
     result.error ? `Execution limitation: ${result.error}` : "",
     result.truncated ? "The response was truncated. Do not treat omitted evidence as verified." : "",
+    partialEvidenceWarning(result),
     result.output || "No assistant answer was produced. Inspect execution details; do not relaunch blindly.",
   ].filter(Boolean).join("\n\n");
 }
@@ -185,10 +193,10 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     description: "Start a bounded, read-only evidence assignment without waiting. Returns a task ID, not an answer. Results arrive automatically at parent turn boundaries (8 KiB answer maximum). No recursive delegation.",
     promptSnippet: "Delegate an independent evidence question to stela-helper",
     promptGuidelines: [
-      "Follow FARO: proactively use stela_delegate for bounded, independent read-only evidence questions when isolated reasoning has a clear benefit over direct work or a tool call. Do not wait for the user to mention delegation. Prefer work that can overlap useful parent work; resolve small, straightforward questions directly.",
-      "Give stela_delegate the objective, minimal context, authorized existing reference paths, applicable restrictions and an observable completion criterion. Routine delegation inside the already authorized task needs no separate approval unless the user or an applicable policy requires it. Never delegate denied actions, broaden access, or assign writing, shell execution, tests, continuity updates or recursive delegation to stela-helper.",
+      "Follow FARO's proportional delegation policy when selecting an independent, read-only evidence assignment.",
+      "Give stela_delegate the objective, minimal context, authorized existing reference paths, applicable restrictions and an observable completion criterion. Select timeout_seconds before launch; an active duplicate retains its original budget. A larger budget never expands access or the helper's capabilities.",
       "After stela_delegate, continue independent work. Do not poll, sleep, duplicate an active assignment, or inspect the same evidence without a distinct reason. If nothing independent remains, report that the result is pending; the host waits without extra model calls.",
-      "Do not claim final completion while a required stela_delegate result is pending. Integrate its evidence and limitations; process success is not requirement verification. Use stela_cancel when an assignment is no longer relevant.",
+      "For stela_delegate results, treat retained text from failed or cancelled execution as partial evidence, not a completed answer. Report missing required evidence; do not relaunch automatically or silently substitute your own work. Use stela_cancel when an assignment is no longer relevant.",
     ],
     parameters: assignmentSchema as never,
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -218,8 +226,8 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
         void current.waitForTask(task.id).then(() => signal.removeEventListener("abort", abort));
       }
       return {
-        content: [{ type: "text", text: `${duplicate ? "Existing assignment" : "Accepted"}: ${task.id} | stela-helper | ${task.assignment.label} | ${task.state}. Results are delivered automatically. Continue independent work; do not poll or relaunch.` }],
-        details: { taskId: task.id, label: task.assignment.label, state: task.state, duplicate },
+        content: [{ type: "text", text: `${duplicate ? "Existing assignment" : "Accepted"}: ${task.id} | stela-helper | ${task.assignment.label} | ${task.state}. Execution budget: ${executionTimeoutSeconds(task.assignment.timeout_seconds)} seconds. Results are delivered automatically. Continue independent work; do not poll or relaunch.` }],
+        details: { taskId: task.id, label: task.assignment.label, state: task.state, duplicate, timeoutSeconds: executionTimeoutSeconds(task.assignment.timeout_seconds) },
       };
     },
   });
@@ -248,8 +256,10 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
       const output = id ? task ? [
         `${task.id} | stela-helper | ${task.assignment.label} | ${task.state}`,
         `Objective: ${task.assignment.objective}`,
+        `Execution budget: ${executionTimeoutSeconds(task.assignment.timeout_seconds)} seconds.`,
         ...(task.result?.trace ?? []),
-        task.result?.error ?? "", task.result?.diagnostics ?? "", task.result?.output ?? "",
+        task.result?.error ?? "", task.result?.diagnostics ?? "",
+        task.result ? partialEvidenceWarning(task.result) : "", task.result?.output ?? "",
       ].filter(Boolean).join("\n") : "Unknown task in this session." : current.list().map((item) => `${item.id} | stela-helper | ${item.assignment.label} | ${item.state}`).join("\n") || "No helper tasks in this session.";
       if (ctx.hasUI) ctx.ui.notify(boundedText(output, 16 * 1024), "info");
     },

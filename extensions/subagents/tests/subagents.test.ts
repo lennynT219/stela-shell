@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { TaskQueue, concurrencyLimit, validateAssignment, type Assignment } from "../tasks.ts";
+import { TaskQueue, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, concurrencyLimit, validateAssignment, type Assignment } from "../tasks.ts";
 import { CHILD_MARKER, CHILD_SCOPE, READY_ENTRY, BLOCKED_ENTRY, RESULT_BYTES, boundedText, childArguments, makeScope, pathInScope, resolveLaunch, runChild, type RunOptions, type RunResult } from "../runner.ts";
 import { registerSubagents, formatResult } from "../index.ts";
 import faroMethod from "../../method/index.ts";
@@ -82,10 +82,12 @@ test("FARO delegation instructions reach the parent tool and bounded helper role
   const delegate = h.tools.get("stela_delegate");
   assert.equal(delegate.exposure, "model-only");
   const guidelines = delegate.promptGuidelines.join("\n");
-  assert.match(guidelines, /Follow FARO: proactively use stela_delegate/);
-  assert.match(guidelines, /Do not wait for the user to mention delegation/);
-  assert.match(guidelines, /resolve small, straightforward questions directly/);
-  assert.match(guidelines, /Never delegate denied actions, broaden access/);
+  assert.match(guidelines, /Follow FARO's proportional delegation policy/);
+  assert.match(injected.systemPrompt, /Resolve small, understood work directly/);
+  assert.match(injected.systemPrompt, /one coherent objective/);
+  assert.match(injected.systemPrompt, /not into a child per file or a fixed workflow/);
+  assert.match(guidelines, /Select timeout_seconds before launch/);
+  assert.match(guidelines, /never expands access or the helper's capabilities/);
 
   const args = childArguments(options());
   const helperIndex = args.lastIndexOf("--append-system-prompt");
@@ -99,9 +101,55 @@ test("FARO delegation instructions reach the parent tool and bounded helper role
 });
 
 test("assignment validation keeps the bounded contract and rejects authority/configuration injection", () => {
-  assert.deepEqual(validateAssignment(assignment), assignment);
+  assert.deepEqual(validateAssignment(assignment), { ...assignment, timeout_seconds: DEFAULT_TIMEOUT_SECONDS });
   for (const input of [null, [], {}, { ...assignment, objective: " " }, { ...assignment, references: [] }, { ...assignment, references: [3] }, { ...assignment, context: "x".repeat(8193) }, { ...assignment, label: "bad\nlabel" }, { ...assignment, model: "other" }, { ...assignment, cwd: "/" }, { ...assignment, tools: ["bash"] }]) assert.throws(() => validateAssignment(input));
   assert.equal(validateAssignment({ ...assignment, context: undefined, constraints: undefined }).context, "");
+});
+
+test("execution budget defaults to 120 seconds and rejects values outside 120–300 before admission", async () => {
+  assert.equal(validateAssignment(assignment).timeout_seconds, 120);
+  for (const seconds of [120, 180, MAX_TIMEOUT_SECONDS]) {
+    assert.equal(validateAssignment({ ...assignment, timeout_seconds: seconds }).timeout_seconds, seconds);
+  }
+  const h = harness(); let launched = 0;
+  registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: async () => { launched++; return success; } });
+  await h.emit("session_start");
+  const tool = h.tools.get("stela_delegate");
+  assert.deepEqual(tool.parameters.properties.timeout_seconds, {
+    type: "integer", minimum: 120, maximum: 300, default: 120,
+    description: tool.parameters.properties.timeout_seconds.description,
+  });
+  for (const value of [null, "300", true, 0, 119, 301, 120.5, NaN, Infinity, -Infinity]) {
+    assert.throws(() => validateAssignment({ ...assignment, timeout_seconds: value }), /timeout_seconds/);
+    await assert.rejects(tool.execute("call", { ...assignment, timeout_seconds: value }, undefined, undefined, h.ctx), /timeout_seconds/);
+  }
+  assert.equal(launched, 0);
+  await h.emit("session_shutdown");
+});
+
+test("admission propagates budgets and an active duplicate cannot extend or restart its original work", async () => {
+  const h = harness(); const job = deferred<RunResult>(); const captured: RunOptions[] = [];
+  registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => { captured.push(opts); return job.promise; } });
+  await h.emit("session_start");
+  const tool = h.tools.get("stela_delegate");
+  const first = await tool.execute("first", assignment, undefined, undefined, h.ctx);
+  const duplicate = await tool.execute("duplicate", { ...assignment, timeout_seconds: 300 }, undefined, undefined, h.ctx);
+  assert.equal(duplicate.details.taskId, first.details.taskId);
+  assert.equal(duplicate.details.duplicate, true);
+  assert.equal(duplicate.details.timeoutSeconds, 120);
+  assert.match(duplicate.content[0].text, /Execution budget: 120 seconds/);
+  const extended = await tool.execute("extended", { ...assignment, objective: "Independent audit", timeout_seconds: 300 }, undefined, undefined, h.ctx);
+  assert.equal(extended.details.timeoutSeconds, 300);
+  assert.match(extended.content[0].text, /Execution budget: 300 seconds/);
+  await tick(); // Admission returns before the new execution microtask runs.
+  assert.deepEqual(captured.map((opts) => opts.assignment.timeout_seconds), [120, 300]);
+  assert.deepEqual(captured[1].scope.tools, ["read", "grep", "find", "ls"]);
+  await h.commands.get("stela-tasks").handler(extended.details.taskId, h.ctx);
+  assert.match(h.notifications[0], /Execution budget: 300 seconds/);
+  job.resolve(success);
+  await h.emit("agent_before_settle", { entries: [], outcome: "completed" });
+  assert.equal(captured.length, 2);
+  await h.emit("session_shutdown");
 });
 
 test("concurrency defaults to five, accepts one through five and rejects other limits", async () => {
@@ -232,6 +280,135 @@ test("JSON runner bounds model output and reports truncation", async () => {
   assert.match(result.output, /Truncated/);
   assert.doesNotMatch(boundedText("\u001b[31mred\u001b[0m\u0007", 100), /\u001b|\u0007/);
 });
+
+test("JSON runner schedules the actual default or extended deadline and supplies the same budget to the child", async (t) => {
+  const timer = t.mock.method(globalThis, "setTimeout");
+  for (const timeout_seconds of [undefined, MAX_TIMEOUT_SECONDS]) {
+    const start = timer.mock.callCount();
+    const result = await runChild(options("echo", { assignment: { ...assignment, timeout_seconds }, timeoutMs: undefined }));
+    const seconds = timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS;
+    assert.equal(result.status, "completed");
+    assert.match(result.output, new RegExp(`Execution budget: ${seconds} seconds`));
+    assert.ok(timer.mock.calls.slice(start).some((call) => call.arguments[1] === seconds * 1000), "the timer must use the assigned budget, not the fixture's 5-second seam");
+  }
+});
+
+test("JSON runner rejects invalid or budget-expanding internal timeouts without spawning", async () => {
+  for (const timeoutMs of [0, -1, NaN, Infinity, 1.5, 120_001]) {
+    const result = await runChild(options("echo", { timeoutMs }));
+    assert.equal(result.status, "failed");
+    assert.match(result.error!, /Invalid execution timeout/);
+    assert.equal(result.output, "");
+    assert.deepEqual(result.trace, []);
+  }
+  const result = await runChild(options("echo", { assignment: { ...assignment, timeout_seconds: 301 } }));
+  assert.equal(result.status, "failed");
+  assert.match(result.error!, /timeout_seconds/);
+});
+
+test("JSON runner retains bounded read ranges but not source contents or unrelated arguments", async () => {
+  const result = await runChild(options("ranges"));
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.trace.slice(0, 4), [
+    "read /fixture/source.ts offset=1 limit=200",
+    "read /fixture/source.ts offset=201 limit=80",
+    "read /fixture/source.ts",
+    "read /fixture/source.ts",
+  ]);
+  assert.match(result.trace[4], /offset=42 limit=7$/);
+  assert.ok(result.trace.every((entry) => Buffer.byteLength(entry) <= 256));
+  assert.doesNotMatch(result.trace.join("\n"), /DO_NOT_RETAIN_CONTENT/);
+});
+
+for (const scenario of ["partial-empty-final", "partial-spaces-final", "partial-thinking-final", "partial-restarted"]) {
+  test(`JSON runner retains partial text without false completion for ${scenario}`, async () => {
+    const result = await runChild(options(scenario));
+    assert.equal(result.status, "failed");
+    assert.match(result.error!, /nonempty final answer/);
+    if (scenario === "partial-restarted") assert.match(result.output, /Answer: bounded evidence/);
+    else assert.equal(result.output, "Partial evidence B: ñ🙂");
+    assert.doesNotMatch(result.output, /Older public text A|PRIVATE_/);
+    const formatted = formatResult({ id: "partial", assignment, state: "failed", delivered: false, sourcesMayHaveChanged: false, result });
+    assert.match(formatted, /Partial evidence only/);
+  });
+}
+
+test("JSON runner replaces a retained partial with a genuine final answer", async () => {
+  const result = await runChild(options("partial-valid-final"));
+  assert.equal(result.status, "completed");
+  assert.match(result.output, /Answer: bounded evidence/);
+  assert.doesNotMatch(result.output, /Partial evidence B|PRIVATE_/);
+  assert.doesNotMatch(formatResult({ id: "final", assignment, state: "completed", delivered: false, sourcesMayHaveChanged: false, result }), /Partial evidence only/);
+});
+
+for (const scenario of ["stream-hang", "stream-thinking-hang", "stream-large-hang"]) {
+  test(`JSON runner preserves only bounded public streaming text on ${scenario}`, async () => {
+    const result = await runChild(options(scenario, { timeoutMs: 1500 }));
+    assert.equal(result.status, "failed");
+    assert.match(result.error!, /1\.5-second execution deadline/);
+    assert.ok(Buffer.byteLength(result.output) <= RESULT_BYTES);
+    assert.doesNotMatch(result.output, /PRIVATE_|Stream A/);
+    if (scenario === "stream-thinking-hang") assert.equal(result.output, "Earlier public evidence");
+    else assert.match(result.output, /^Stream corrected ñ🙂\nSecond block/);
+    assert.equal(result.truncated, scenario === "stream-large-hang");
+  });
+}
+
+for (const scenario of ["stream-empty-final", "stream-valid-final"]) {
+  test(`JSON runner uses authoritative message_end, not streaming text, for completion on ${scenario}`, async () => {
+    const result = await runChild(options(scenario));
+    assert.doesNotMatch(result.output, /PRIVATE_|Stream A/);
+    if (scenario === "stream-empty-final") {
+      assert.equal(result.status, "failed");
+      assert.equal(result.output, "Stream corrected ñ🙂\nSecond block");
+    } else {
+      assert.equal(result.status, "completed");
+      assert.match(result.output, /^Answer: bounded evidence/);
+      assert.doesNotMatch(result.output, /Stream corrected/);
+    }
+  });
+}
+
+test("JSON runner keeps an 8 KiB bounded Unicode partial and actual deadline diagnostic on timeout", async () => {
+  const result = await runChild(options("partial-large-hang", { timeoutMs: 1500 }));
+  assert.equal(result.status, "failed");
+  assert.match(result.error!, /1\.5-second execution deadline; no retry was started/);
+  assert.equal(result.truncated, true);
+  assert.ok(Buffer.byteLength(result.output) <= RESULT_BYTES);
+  assert.match(result.output, /^ñ🙂 evidence/);
+  assert.match(result.output, /Truncated/);
+  assert.doesNotMatch(result.output, /PRIVATE_/);
+});
+
+for (const action of ["timeout", "cancel"]) {
+  test(`extension delivers partial ${action} evidence once without relaunch or false success`, async () => {
+    const h = harness(); let launches = 0;
+    registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => {
+      launches++;
+      return runChild({ ...opts, launch: { command: process.execPath, prefix: [fixture, action === "timeout" ? "partial-ignore-term" : "stream-hang"], resourceArgs: [] }, timeoutMs: action === "timeout" ? 1500 : 5000, killGraceMs: 50 });
+    } });
+    await h.emit("session_start");
+    const receipt = await h.tools.get("stela_delegate").execute("partial", assignment, undefined, undefined, h.ctx);
+    if (action === "cancel") {
+      await delay(800);
+      await h.tools.get("stela_cancel").execute("cancel", { task_id: receipt.details.taskId }, undefined, undefined, h.ctx);
+    }
+    const boundary = await h.emit("agent_before_settle", { entries: [], outcome: "completed" });
+    assert.equal(boundary.entries.length, 1);
+    const expected = action === "timeout" ? "failed" : "cancelled";
+    assert.equal(boundary.entries[0].details.state, expected);
+    assert.match(boundary.entries[0].content, /Partial evidence only/);
+    assert.match(boundary.entries[0].content, action === "timeout" ? /Partial evidence B: ñ🙂/ : /Stream corrected ñ🙂/);
+    assert.doesNotMatch(boundary.entries[0].content, /PRIVATE_/);
+    assert.equal(boundary.entries[0].details.result, undefined);
+    await h.commands.get("stela-tasks").handler(receipt.details.taskId, h.ctx);
+    assert.match(h.notifications[0], /Partial evidence only/);
+    if (action === "timeout") assert.match(h.notifications[0], /read \/fixture\/source\.ts offset=1 limit=200/);
+    assert.equal(await h.emit("turn_end", { entries: [], outcome: "completed" }), undefined);
+    assert.equal(launches, 1);
+    await h.emit("session_shutdown");
+  });
+}
 
 for (const scenario of ["malformed", "oversized-frame", "unterminated", "missing-settle", "empty", "error", "length", "no-guard", "unexpected-tool", "blocked", "nonzero", "signal"]) {
   test(`JSON runner does not report success for ${scenario}`, async () => {
