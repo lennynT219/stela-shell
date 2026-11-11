@@ -4,9 +4,13 @@
   "private": true,
   "description": "StelaShell es una integracion para PI coding agent",
   "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test extensions/subagents/tests/*.test.ts"
+  },
   "pi": {
     "extensions": [
-      "./extensions/method/index.ts"
+      "./extensions/method/index.ts",
+      "./extensions/subagents/index.ts"
     ]
   }
 }
