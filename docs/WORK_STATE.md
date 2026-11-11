@@ -22,6 +22,7 @@ Accepted FARO/continuity v1 and the first bounded read-only subagent core remain
 - Verified on Windows: the release helper builds with the installed Microsoft C++ tools; Rust argv tests, shared JSON-runner fixtures, native Job lifecycle tests and isolated deterministic Pi integration all pass. The prior linker blocker is resolved.
 - Documentation and explicit build/test scripts updated in README, PROJECT_CONTEXT and package.json. The method extension is unchanged. The local release artifact remains ignored by Git.
 - Development link created: the active Windows profile is `$HOME/.stela-shell`, not the earlier example `$HOME/.stela-shell/agent`. Its `extensions/subagents` junction points to this checkout beside the existing method link. No settings were edited and no duplicate package/extension registration was found in that profile.
+- Implementation committed locally; publication is blocked because GitHub rejected this session's push with `Permission denied (publickey)`. No credential, transport or remote changes were attempted. Git history and tracking status identify the pending commits.
 - Pending: affected Linux runtime regression checks. No Linux/WSL environment is available here; source portability and process-plan tests are not equivalent to native Linux execution. Live-provider/TUI observation and profile activation are not part of the current verification.
 
 ## Relevant evidence
@@ -37,4 +38,5 @@ Accepted FARO/continuity v1 and the first bounded read-only subagent core remain
 
 - Run the affected suite in a real Linux environment before declaring cross-platform runtime verification complete. Do not simulate an OS selector and label it native validation. An available Linux environment is the remaining verification prerequisite; none is installed or configured automatically.
 - The Windows artifact is ready locally. Rebuild explicitly from Developer PowerShell/Command Prompt after changing Rust source, using the Microsoft linker rather than Git/MSYS `link.exe`; runtime delegation does not build it.
+- Complete the authorized publication from a terminal with the permitted SSH key available. The agent's denied push is stopped; do not bypass the restriction with another identity or transport.
 - Reload the active Pi session to discover the newly created development link. Real-provider/TUI observation, other profile changes, additional capabilities and subsequent publication need their own authorization; the current commit/push approval is limited to this delivery. The historical obsolete continuity-review reminder, if emitted by another loaded instance, remains outside this runner implementation.
