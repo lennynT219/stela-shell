@@ -28,7 +28,15 @@ for (const action of ["read", "write", "permission-denied"]) {
         "--model", "stela-fixture/deterministic", "--thinking", "off", "Resolve the fixture assignment",
       ], {
         cwd, timeout: 25_000, maxBuffer: 2 * 1024 * 1024,
-        env: { PATH: process.env.PATH, HOME: home, TMPDIR: scratch, PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1", NO_UPDATE_NOTIFIER: "1", STELA_FIXTURE_ACTION: action },
+        env: {
+          PATH: process.env.PATH, HOME: home, TMPDIR: scratch,
+          ...(process.platform === "win32" ? {
+            SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
+            USERPROFILE: home, TEMP: scratch, TMP: scratch,
+            APPDATA: join(home, "AppData", "Roaming"), LOCALAPPDATA: join(home, "AppData", "Local"),
+          } : {}),
+          PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1", NO_UPDATE_NOTIFIER: "1", STELA_FIXTURE_ACTION: action,
+        },
       });
       // Pi reads piped stdin before startup; close the test client's unused input.
       execution.child.stdin?.end();

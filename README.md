@@ -11,11 +11,13 @@ For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) f
 | `extensions/method/assets/method.md` | FARO's agent-facing instructions, in English. |
 | `extensions/method/index.ts` | Loads FARO, appends it to the incoming system prompt, and provides lifecycle-based reminders to consult the project's work state. |
 | `extensions/subagents/index.ts` | Registers delegation/cancellation, child read restrictions and session-bound result delivery. |
-| `extensions/subagents/runner.ts` | Runs a child Pi process, parses bounded JSON events and handles termination. |
+| `extensions/subagents/runner.ts` | Shared child protocol, bounded JSON parsing, deadlines and result handling. |
+| `extensions/subagents/processes.ts` | Platform-specific process ownership: POSIX groups or the Windows Job controller. |
+| `native/windows-job/` | Windows-only Rust controller, dependency lockfile and argv-encoding tests. |
 | `extensions/subagents/tasks.ts` | Owns the in-memory queue, deduplication and concurrency limit. |
 | `extensions/subagents/assets/helper.md` | The single reusable `stela-helper` instruction contract. |
 | `extensions/subagents/tests/` | Node tests and opt-in native Pi integration with a deterministic local provider. |
-| `package.json` | Declares both extension entry points and the test command. No dependencies are added. |
+| `package.json` | Declares both extension entry points and explicit test/helper-build commands. No npm dependencies are added. |
 
 The method extension supplies instructions; it does not enforce permissions, Git restrictions, or agent behavior. Changes to the Markdown require reloading the extension. The user's configuration report and source checks remain distinct from independently observed live behavior.
 
@@ -39,9 +41,16 @@ The queue and technical details are memory-only (up to 32 recent tasks). Pi reco
 
 ### Runtime and permission boundary
 
-The first runner targets **native packaged Pi on POSIX**, exercised on Linux with Pi 1.5.2 and Node 24.22.2. It preserves the parent's profile/environment and recognized explicit extension/prompt resource flags, then adds an explicit tool allowlist and the child guard. Existing permission hooks remain loaded; the guard adds restrictions rather than replacing them. Unknown parent CLI flags, remote `-e` package sources, SDK/bridge/source launchers and Windows are rejected rather than silently switching to another Pi executable or dropping a policy option. Runtime-only grants or changes in another extension are not serialized as new consent.
+The shared runner targets **native packaged Pi**, preserving the parent's executable, profile/environment and recognized explicit extension/prompt resource flags. It adds an explicit tool allowlist and the child guard without replacing existing permission hooks. Unknown parent CLI flags, remote `-e` sources and unsupported SDK/bridge/source launchers fail instead of selecting another executable or dropping policy options. Runtime-only grants or changes in another extension are not serialized as new consent.
 
-Children run with Pi's offline management mode to avoid automatic package/tool downloads and catalog updates; that mode still permits the selected model's inference requests. Built-in MCP support is disabled for children. There is no installation, new dependency, credential copying, profile rewrite or automatic index setup in this extension.
+Process ownership is platform-specific; the assignment, protocol and read-only limits are shared:
+
+- **Linux/POSIX:** an owned process group, `SIGTERM` followed by `SIGKILL` when needed, and group cleanup when the leader exits (before waiting for inherited pipes to close). No Rust executable is required.
+- **Windows 10+:** a locally built Rust controller uses `windows-sys`. It creates the child suspended with atomic Job assignment via `PROC_THREAD_ATTRIBUTE_JOB_LIST`, verifies containment and only then resumes it. Only the three stdio handles are inherited; the Job handle is not. The controller waits on the parent/child handles and observes an empty Job after normal leader completion. Cancelling the controller closes its `KILL_ON_JOB_CLOSE` Job, terminating descendants; abrupt parent death also triggers cleanup. Windows termination is immediate, not emulated POSIX graceful signaling.
+
+If the helper is missing or Job setup fails (including incompatible surrounding Job restrictions), delegation fails closed. There is no shell-based launch, `taskkill` fallback, automatic compilation or download. Runtime support must be established by execution on the target platform; a successful `cargo check` alone is not a linked executable or a runtime test. Windows native controller and isolated Pi integration checks have been exercised; current evidence and remaining platform limits are in [Work state](docs/WORK_STATE.md).
+
+Children use Pi's offline management mode to avoid automatic package/tool downloads and catalog updates; selected-model inference requests remain permitted. Built-in MCP support is disabled. Runtime delegation does not install dependencies, copy credentials, rewrite profiles or create indexes. Cargo dependencies are downloaded only during an explicitly requested build.
 
 Read-only here is a restriction on model-issued tools, **not an OS sandbox**: trusted loaded extensions and the provider still execute with the account's permissions and may have their own startup/authentication effects. Reference checks canonicalize paths (including symlinks), but do not protect against hostile filesystem races or trusted extensions that rewrite calls after the guard. Do not use this core to bypass another integration's permissions. The workspace is live, not a snapshot. Potential parent mutations mark outstanding evidence as possibly stale; external changes and arbitrary extension side effects are not exhaustively detected.
 
@@ -49,7 +58,18 @@ This is a StelaShell implementation using Pi's public API and JSON process proto
 
 ### Activation and checks
 
-The package manifest declares the extension; this does not activate it in an already configured profile. No profile link or setting was changed during implementation. When activation is authorized, use the agreed single development link for `extensions/subagents/`, or load the package through one route only. Do not duplicate it with an additional package registration.
+The package manifest declares the extension; this does not activate it in an already configured profile. Use one development link for `extensions/subagents/`, or load the package through one route only. Do not duplicate it with an additional package registration.
+
+The current Windows development setup uses `PI_CODING_AGENT_DIR=$HOME/.stela-shell` with a directory junction at `$HOME/.stela-shell/extensions/subagents` pointing to this checkout's `extensions/subagents/`. It sits beside the existing method link; no settings entry is needed. This link is machine-local and is not transferred by Git. Use the actual configured profile root on each machine rather than automatically appending `/agent`; reload Pi after adding the link.
+
+On Windows, first prepare the controller explicitly from the repository root. Prerequisites are Rust 1.85+ with the MSVC target, the Visual Studio C++ Build Tools and Windows SDK. Use a Developer PowerShell/Command Prompt with the Microsoft linker available, not Git/MSYS `link.exe`:
+
+```powershell
+npm run build:windows-helper
+npm run test:windows-helper
+```
+
+These commands run Cargo with `native/windows-job/Cargo.lock`. The runner expects `native/windows-job/target/release/stela-job.exe` for the local machine; rebuild it after changing Rust source and do not redirect Cargo's output elsewhere. Build artifacts are ignored by Git. An extension development link resolves back to its real checkout before locating this helper. Linux/POSIX does not need this build. No global tool installation is performed by these scripts.
 
 Run local tests with Node's built-in runner (Node 22.19+):
 
@@ -57,7 +77,9 @@ Run local tests with Node's built-in runner (Node 22.19+):
 npm test
 ```
 
-Native Pi integration is opt-in and uses a temporary isolated profile and deterministic provider: no real credentials, network model requests or paid generation. Set the path to an existing packaged Pi CLI, for example:
+The shared JSON-runner fixtures require the helper on Windows; absence is a setup error, not evidence that those scenarios passed. The dedicated native Job tests explicitly skip when the artifact is absent or the OS is not Windows. They cover argv/Unicode, normal leader exit with live descendants, cancellation, forced controller termination, parent death and fail-closed startup. POSIX descendant cleanup remains covered by the Linux-specific test; changing a platform selector in a unit test is not real execution on that OS.
+
+Native Pi integration is opt-in and uses a temporary isolated profile and deterministic provider: no real credentials, network model requests or paid generation. Windows also requires the compiled helper. Set the path to an existing packaged Pi CLI, for example:
 
 ```sh
 STELA_TEST_PI_CLI=/absolute/path/to/pi-coding-agent/dist/bundle/cli.js npm test
@@ -70,7 +92,7 @@ Without that variable, native integration tests are explicitly skipped. Temporar
 1. Transfer this Git history through an authorized remote or another backup mechanism. A local commit alone is not a remote backup.
 2. Read the FARO document and the extension entry point before continuing development.
 3. Prepare Pi separately. The previously observed development installation was Pi 1.5.0; compatibility still needs a live integration check on the target computer.
-4. Keep the StelaShell profile separate, using `~/.stela-shell/agent` rather than an unrelated agent profile. Configure credentials locally; do not commit or copy authentication files into this repository.
+4. Keep the StelaShell profile separate, using the directory selected by `PI_CODING_AGENT_DIR` rather than an unrelated agent profile. The current Windows setup uses `~/.stela-shell`; earlier Fish examples use `~/.stela-shell/agent`. These are different profile roots, not two steps to apply together. Configure credentials locally; do not commit or copy authentication files into this repository.
 5. Validate extension loading and prompt composition in that profile before enabling it for normal work. Use one loading route only to avoid duplicate registration.
 
 The agreed development approach is one symlink per extension. The user reports setup complete on the development machine; recreate machine-local links as needed on another computer rather than treating the original setup as unfinished. The manifest declaration alone does not establish that a given Pi instance has loaded the extension.
@@ -90,10 +112,10 @@ Those historical checks do not validate later changes, the live Pi loader, reloa
 ## Next work
 
 - Resume from the project context and work state without reopening the accepted first version's completed publication.
-- Activate and observe the subagent core in the user's profile only with authorization. Delegated writing, additional integrations and other roadmap capabilities remain outside this first core.
+- Reload the active profile after creating its development link. Live-provider/TUI observation requires its corresponding authorization and is not established by the isolated integration checks. Delegated writing, additional integrations and other roadmap capabilities remain outside this core.
 - Check integration when the target environment changes or a concrete issue requires it, rather than repeating an unrelated full-environment audit.
 
-Pi remains the agent. Rust is intended for selected tools, a launcher, and installation responsibilities when needed; no Rust component has been implemented. The read-only subagent core is implemented; memory integrations and delegated writing are not.
+Pi remains the agent. Rust is used only for the Windows process controller in this implementation; no general Rust launcher or installer is provided. The read-only subagent core is implemented; memory integrations and delegated writing are not.
 
 ## Working agreements
 

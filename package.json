@@ -5,7 +5,9 @@
   "description": "StelaShell es una integracion para PI coding agent",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-strip-types --test extensions/subagents/tests/*.test.ts"
+    "test": "node --experimental-strip-types --test extensions/subagents/tests/*.test.ts",
+    "build:windows-helper": "cargo build --locked --release --manifest-path native/windows-job/Cargo.toml",
+    "test:windows-helper": "cargo test --locked --manifest-path native/windows-job/Cargo.toml"
   },
   "pi": {
     "extensions": [

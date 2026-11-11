@@ -151,11 +151,15 @@ test("scope checks canonical paths and reject traversal, missing files and symli
     const allowed = join(dir, "allowed"); mkdirSync(allowed);
     writeFileSync(join(allowed, "source.txt"), "evidence");
     writeFileSync(join(dir, "outside.txt"), "outside");
-    symlinkSync(join(dir, "outside.txt"), join(allowed, "escape"));
+    const outside = join(dir, "outside"); mkdirSync(outside);
+    writeFileSync(join(outside, "source.txt"), "outside");
+    // Directory junctions exercise canonical-path escapes on Windows without
+    // requiring administrator privileges or Developer Mode for file symlinks.
+    symlinkSync(outside, join(allowed, "escape"), process.platform === "win32" ? "junction" : "dir");
     const scope = makeScope([allowed], dir, ["read"]);
     assert.equal(pathInScope("allowed/source.txt", dir, scope), true);
     assert.equal(pathInScope("allowed/../outside.txt", dir, scope), false);
-    assert.equal(pathInScope("allowed/escape", dir, scope), false);
+    assert.equal(pathInScope("allowed/escape/source.txt", dir, scope), false);
     assert.equal(pathInScope("missing", dir, scope), false);
     assert.throws(() => makeScope([allowed], dir, ["bash"]));
     assert.throws(() => makeScope([allowed], dir, []));

@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import type { Assignment } from "./tasks.ts";
+import { spawnManaged, type ManagedProcess } from "./processes.ts";
 
 export const CHILD_MARKER = "STELA_SUBAGENT_CHILD";
 export const CHILD_SCOPE = "STELA_SUBAGENT_SCOPE";
@@ -123,9 +123,9 @@ export function childArguments(options: RunOptions): string[] {
 export async function runChild(options: RunOptions): Promise<RunResult> {
   const result: RunResult = { status: "failed", output: "", diagnostics: "", trace: [], truncated: false };
   if (options.signal.aborted) return { ...result, status: "cancelled", error: "Cancelled before launch." };
-  if (process.platform === "win32") return { ...result, error: "This first runner requires POSIX process-group cleanup; Windows is not supported yet." };
   return new Promise((resolveResult) => {
-    let child: ReturnType<typeof spawn>;
+    let managed: ManagedProcess;
+    let child: ManagedProcess["child"];
     let ready = false;
     let settled = false;
     let stopReason: string | undefined;
@@ -137,23 +137,21 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let shutdownDeadline: ReturnType<typeof setTimeout> | undefined;
-    const group = process.platform !== "win32";
-
-    const kill = (signal: NodeJS.Signals) => {
-      if (!child?.pid) return;
+    const kill = (force: boolean) => {
+      if (!managed) return;
       try {
-        if (group) process.kill(-child.pid, signal);
-        else child.kill(signal);
+        if (force) managed.forceTerminate();
+        else managed.terminate();
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") result.diagnostics = boundedText(`${result.diagnostics}\nCould not terminate child: ${String(error)}`, 2048);
+        result.diagnostics = boundedText(`${result.diagnostics}\nCould not terminate child: ${String(error)}`, 2048);
       }
     };
     const stop = (message: string) => {
       reason ??= message;
       if (stopping || completed) return;
       stopping = true;
-      kill("SIGTERM");
-      killTimer = setTimeout(() => kill("SIGKILL"), options.killGraceMs ?? 1000);
+      kill(false);
+      killTimer = setTimeout(() => kill(true), options.killGraceMs ?? 1000);
     };
     const abort = () => stop("Cancelled by the parent.");
     const finish = (code: number | null, signal: NodeJS.Signals | null) => {
@@ -199,12 +197,11 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
       }
     };
     try {
-      child = spawn(options.launch.command, childArguments(options), {
+      managed = spawnManaged(options.launch.command, childArguments(options), {
         cwd: options.cwd,
         env: { ...(options.env ?? process.env), [CHILD_MARKER]: "1", [CHILD_SCOPE]: JSON.stringify(options.scope), PI_OFFLINE: "1" },
-        shell: false, detached: group, windowsHide: true,
-        stdio: ["pipe", "pipe", "pipe"],
       });
+      child = managed.child;
     } catch (error) {
       reason = `Could not spawn child: ${String(error)}`;
       finish(null, null);
@@ -229,9 +226,8 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
     child.stderr!.on("data", (chunk: string) => { result.diagnostics = boundedText(result.diagnostics + chunk, 2048); });
     child.on("error", (error) => { reason ??= `Could not run child: ${error.message}`; });
     child.on("close", (code, signal) => {
-      // The leader may exit before a descendant that ignored SIGTERM. Do not orphan
-      // anything still in this child-owned group when clearing the escalation timer.
-      if (group) kill("SIGKILL");
+      try { managed.cleanup(); }
+      catch (error) { reason ??= `Could not clean up child processes: ${String(error)}`; }
       if (buffer.trim() && !stopping) reason ??= "Unterminated child JSON record.";
       finish(code, signal);
     });

@@ -32,7 +32,7 @@ At preparation time:
 - A prior Node.js 26.8.1 probe passed five checks against the original extension entry point using a registration stub: manifest entry, nonempty standalone method, hook registration, preservation of the incoming prompt, and no extension-local prompt accumulation.
 - Those five checks were not a live Pi integration test and do not establish correctness of later continuity changes. Do not relabel historical results as current test runs.
 - The previously observed Pi executable version was 1.5.0. Public documentation may describe a different version; confirm the target API before implementing an integration.
-- No Rust component, launcher, installer or multimedia generator has been established. The later authorized subagent core is described in section 5 and WORK_STATE; it is separate from the accepted FARO/continuity implementation.
+- The subagent core and its separately authorized Windows Rust process controller are described in section 5 and WORK_STATE. The controller is not a general launcher, installer or replacement agent, and is separate from accepted FARO/continuity v1.
 
 Keep four categories distinct: agreed requirements, source-code observations, user-reported configuration, and successfully exercised behavior. A tool declaration, package version, or model's self-description is not runtime proof.
 
@@ -47,6 +47,7 @@ stela-shell/
 ├── docs/
 │   ├── WORK_STATE.md
 │   └── PROJECT_CONTEXT.md
+├── native/windows-job/   # Windows-only controller; Cargo.toml, Cargo.lock, src/
 └── extensions/
     ├── method/
     │   ├── index.ts
@@ -54,6 +55,7 @@ stela-shell/
     └── subagents/
         ├── index.ts
         ├── runner.ts
+        ├── processes.ts
         ├── tasks.ts
         ├── assets/helper.md
         └── tests/
@@ -61,13 +63,16 @@ stela-shell/
 
 Keep relevant tests organized by the capability they verify. Do not create empty placeholder tests or assume an untracked empty directory will be preserved by Git.
 
-The profile is separate from source:
+The profile is separate from source. Its root is selected by `PI_CODING_AGENT_DIR`. The verified Windows development root is `~/.stela-shell`; the earlier Fish snippets below use `~/.stela-shell/agent`. Do not create a second profile merely to match an old example.
 
 ```text
-~/.stela-shell/agent/
+<PI_CODING_AGENT_DIR>/
 └── extensions/
-    └── stela-method -> <checkout>/extensions/method/
+    ├── method -> <checkout>/extensions/method/
+    └── subagents -> <checkout>/extensions/subagents/
 ```
+
+On the current Windows setup these are directory links; the subagent junction was created and checked under the user's activation authorization. The local helper remains in the checkout's ignored build directory, not in the profile or Git.
 
 Development uses one symlink per extension. A real installed distribution can later use versioned installed files. Do not activate an empty entry point or load the same extension through both a development link and a separate package registration.
 
@@ -164,8 +169,8 @@ The read-only comparison is complete. StelaShell implements its own extension us
 - Delivery is event-driven at turn boundaries. When independent parent work finishes first, the subagent extension waits at `agent_before_settle` without provider polling and then requests an integration continuation. This hook belongs to subagents; the accepted method extension still has no such hook and is unchanged. No streamed response is intercepted or buffered.
 - Exact active duplicates reuse a task ID. Cancellation, interruption, reload, session replacement and tree navigation prevent orphaned work or delivery into an unrelated session. Queues are in-memory, not persistent resumable jobs.
 - Only the parent's active, unmodified native readers are eligible, with reference-path checks in the child. The child inherits recognized native Pi resource flags and loaded controls; unknown launch flags, remote `-e` sources and unsupported SDK/bridge/source launchers fail rather than silently dropping policy. This is not an OS sandbox or a mechanism for transferring transient consent.
-- The source lives in `extensions/subagents/`; README describes bounds, usage, tests and runtime limitations. The first runner targets native packaged Pi on POSIX. Windows and arbitrary bridge compatibility are not implemented.
-- Profile activation, live provider validation, performance comparisons, delegated writing and publication remain separate from the authorized source implementation. No profile links/settings or dependencies were changed. Deterministic test evidence is recorded in WORK_STATE, not treated as proof of real-model adherence or speed.
+- The source lives in `extensions/subagents/`; the shared runner delegates process ownership to `processes.ts`. POSIX retains process groups; Windows 10+ uses an explicitly built Rust Job Object controller in `native/windows-job/`. Creation assigns the suspended child to the Job atomically, before resume; missing artifacts or containment failures do not fall back to an uncontrolled launch. Cancellation and parent-death cleanup belong to the controller. Windows termination is immediate rather than POSIX graceful signaling. Arbitrary bridge compatibility remains unsupported.
+- The user authorized the Windows helper in Rust with `windows-sys`, Cargo dependency downloads, local compilation, and runner/test/documentation changes, as well as commit/push of this delivery and its single development link in the active StelaShell profile. This is not standing authorization for later publication or other profile changes. The helper is never downloaded or compiled automatically during delegation; no npm dependency is added. Global tool installation, live-provider validation, performance comparisons and delegated writing remain separately scoped. WORK_STATE distinguishes source implementation, compiler checks, link verification and actual per-OS runtime validation.
 
 Concrete specialized child models, profiles, costs, and effort policies remain undecided or unverified. A global metadata audit was denied and then explicitly deferred. Do not resume it automatically or route around that denial. Its recorded error was: `Permission configuration is human-controlled. Use the mode settings UI; model tools cannot change it.` Historical permission is not current runtime consent.
 
@@ -182,7 +187,7 @@ The goal is useful capabilities with bounded context and nonduplicative verifica
 - **MCP versus extensions:** extensions integrate with Pi lifecycle and UI; MCP connects compatible clients to services and tools. They can be combined. Engram is a memory system, not merely a transport protocol.
 - **Memory:** Engram helped build this context, but its availability in the new session is not assumed. The architecture, persistence policy, and backend integration for StelaShell remain to be developed; any project-local continuity already in the code is a separate capability.
 - **Runtime controls:** instruction text, UI labels, executable guards, and provider-owned consent are different mechanisms. Do not claim that the FARO Markdown enforces permissions. If reusing a managed review integration later, preserve its contracts and consent rather than editing mirrors or hashes to bypass it.
-- **Rust boundary:** choose an extension bridge, MCP service, or executable invocation only after a concrete tool requires it. Do not create a Rust process merely to read the method Markdown.
+- **Rust boundary:** the Windows Job Object controller uses a narrow executable boundary. Other Rust tools still require their own concrete need and integration choice; no universal bridge is selected. Do not create a Rust process merely to read the method Markdown.
 
 One historical tool-discovery snapshot listed 95 names, not 95 proven independent backends. A `project_report` probe once failed without a useful serialized cause; this is not evidence that every analysis tool is broken, nor permission to repair global tooling.
 
@@ -262,7 +267,7 @@ One source-level compatibility question remains: the upstream prompt helper disc
 | Integrations | Pending selection and implementation. |
 | Controls | Pending design and implementation; do not confuse prompt guidance with runtime enforcement. |
 
-For subagents, resume from the implemented core and WORK_STATE's evidence. Do not restart the settled role questionnaire or comparison. The next operational step is separately authorized activation and bounded observation in the user's native Pi profile; adding capabilities or measuring performance requires its own scope.
+For subagents, resume from the shared runner and WORK_STATE's current per-platform evidence. The Windows helper builds and its native lifecycle and isolated Pi integration checks have been exercised. Linux runtime regression validation remains distinct; do not infer it from Windows checks or a platform-selector unit test. Do not restart the settled role questionnaire or comparison. Reloading the active profile and bounded real-provider observation remain distinct from isolated integration checks; additional capabilities or performance measurement require their own scope.
 
 If a concrete failure is reported, investigate that failure before assuming the setup is working or reinstalling it. Otherwise, do not make a speculative full-environment audit a prerequisite for continuing the design.
 
