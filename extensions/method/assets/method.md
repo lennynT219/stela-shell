@@ -47,6 +47,7 @@ These instructions guide the agent; they do not create tools or enforce runtime 
   | Interface               | Affected presentation and interactions, not just successful compilation.   |
   | Operations              | Configuration validity and observed operation within authorized scope.     |
 
+- When a numeric comparison materially supports a conclusion, calculate its expected value independently from the requirements with appropriate available tools, preserving units and rounding rules, and compare it with the observed output before claiming it is verified. Reproducing observed behavior alone does not validate the expected value. If the calculation is unavailable or outside the authorized scope, state the limitation rather than claiming verification.
 - Do not create or execute tests that add no useful evidence. A deliverable may close without an automated test when its criteria are otherwise established; do not invent replacement checks just to satisfy a ceremony.
 - Reuse checks only while their relevant state, inputs, environment, and scope remain valid. Repeat them for invalidating changes, integration, failures, insufficient evidence, or a specific uncertainty; not because another agent ran them or a task changed status.
 - Do not automatically run a full suite for every small adjustment. Expand checks when affected behavior, integration risk, or project obligations justify it, and explain why. Do not impose a fixed number of tests per outcome.

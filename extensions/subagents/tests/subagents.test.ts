@@ -66,7 +66,7 @@ function harness() {
 }
 const fakeLaunch = () => ({ command: "unused", prefix: [], resourceArgs: [] });
 
-test("FARO delegation instructions reach the parent tool and bounded helper role", async () => {
+test("FARO verification and delegation instructions reach the parent tool and bounded helper role", async () => {
   const h = harness();
   faroMethod(h.pi);
   registerSubagents(h.pi, { env: {} });
@@ -79,6 +79,12 @@ test("FARO delegation instructions reach the parent tool and bounded helper role
   assert.match(injected.systemPrompt, /without waiting for the user to request subagents/);
   assert.match(injected.systemPrompt, /When `stela_delegate` is available/);
 
+  const verification = injected.systemPrompt.split("## 4. Verify at meaningful boundaries")[1].split("## 5.")[0];
+  assert.match(verification, /When a numeric comparison materially supports a conclusion/);
+  assert.match(verification, /expected value independently from the requirements with appropriate available tools/);
+  assert.match(verification, /preserving units and rounding rules/);
+  assert.match(verification, /unavailable or outside the authorized scope, state the limitation rather than claiming verification/);
+
   const delegate = h.tools.get("stela_delegate");
   assert.equal(delegate.exposure, "model-only");
   const guidelines = delegate.promptGuidelines.join("\n");
@@ -88,6 +94,9 @@ test("FARO delegation instructions reach the parent tool and bounded helper role
   assert.match(injected.systemPrompt, /not into a child per file or a fixed workflow/);
   assert.match(guidelines, /Select timeout_seconds before launch/);
   assert.match(guidelines, /never expands access or the helper's capabilities/);
+  assert.match(guidelines, /For stela_delegate, when the needed files are already known.*active readers cannot enumerate directories.*explicit file paths rather than only directory references/);
+  assert.match(guidelines, /for example, read alone/);
+  assert.match(guidelines, /Do not enable readers or broaden the scope to compensate/);
 
   const args = childArguments(options());
   const helperIndex = args.lastIndexOf("--append-system-prompt");

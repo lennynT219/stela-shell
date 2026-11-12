@@ -195,6 +195,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     promptGuidelines: [
       "Follow FARO's proportional delegation policy when selecting an independent, read-only evidence assignment.",
       "Give stela_delegate the objective, minimal context, authorized existing reference paths, applicable restrictions and an observable completion criterion. Select timeout_seconds before launch; an active duplicate retains its original budget. A larger budget never expands access or the helper's capabilities.",
+      "For stela_delegate, when the needed files are already known and the helper's active readers cannot enumerate directories (for example, read alone), use their explicit file paths rather than only directory references. Do not enable readers or broaden the scope to compensate.",
       "After stela_delegate, continue independent work. Do not poll, sleep, duplicate an active assignment, or inspect the same evidence without a distinct reason. If nothing independent remains, report that the result is pending; the host waits without extra model calls.",
       "For stela_delegate results, treat retained text from failed or cancelled execution as partial evidence, not a completed answer. Report missing required evidence; do not relaunch automatically or silently substitute your own work. Use stela_cancel when an assignment is no longer relevant.",
     ],
