@@ -39,8 +39,12 @@ export interface RunResult {
   truncated: boolean;
 }
 
+function cleanText(text: string): string {
+  return stripVTControlCharacters(text).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+}
+
 export function boundedText(text: string, bytes: number): string {
-  const clean = stripVTControlCharacters(text).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+  const clean = cleanText(text);
   if (Buffer.byteLength(clean) <= bytes) return clean;
   const suffix = "\n[Truncated; omitted text was not retained.]";
   let prefix = Buffer.from(clean).subarray(0, Math.max(0, bytes - Buffer.byteLength(suffix))).toString("utf8");
@@ -182,10 +186,12 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
       resolveResult(result);
     };
     const retainPublicText = (output: string): boolean => {
-      const text = boundedText(output, RESULT_BYTES);
-      if (!text.trim()) return false;
-      result.output = text;
-      result.truncated = Buffer.byteLength(output) > RESULT_BYTES;
+      const clean = cleanText(output);
+      // A generated truncation notice is not assistant evidence. Validate the
+      // public text first so blank/control-only finals preserve earlier partials.
+      if (!clean.trim()) return false;
+      result.output = boundedText(clean, RESULT_BYTES);
+      result.truncated = Buffer.byteLength(clean) > RESULT_BYTES;
       return true;
     };
     const resetStream = (active: boolean) => {
@@ -229,9 +235,9 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
             if (prefix) streamBlocks.set(index, prefix); else streamBlocks.delete(index);
             streamBytes += Buffer.byteLength(prefix) - Buffer.byteLength(previous);
             const text = [...streamBlocks].sort(([a], [b]) => a - b).map(([, block]) => block).join("\n");
-            retainPublicText(text);
+            const retained = retainPublicText(text);
             streamCapped = streamBytes > RESULT_BYTES || Buffer.byteLength(text) > RESULT_BYTES || Buffer.byteLength(next) > available;
-            if (streamCapped && result.output) result.truncated = true;
+            if (streamCapped && retained) result.truncated = true;
           }
         }
       }

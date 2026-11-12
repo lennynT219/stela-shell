@@ -6,6 +6,7 @@ const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 const ready = () => emit({ type: "entry_appended", entry: { customType: "stela-helper-ready", data: { tools: ["read"] } } });
 const answer = (stopReason = "stop", content = [{ type: "text", text: "Answer: bounded evidence." }, { type: "text", text: "Limitations: source only." }]) => emit({ type: "message_end", message: { role: "assistant", stopReason, content } });
 const settle = () => emit({ type: "agent_settled", aborted: false });
+const blank = (kind) => (kind.includes("controls") ? "\u001b[31m \u001b[0m\u0007" : kind.includes("unicode") ? "\u2003" : " ").repeat(9000);
 
 if (scenario !== "no-guard") ready();
 emit({ type: "agent_start" });
@@ -22,6 +23,8 @@ if (scenario === "success") {
   settle();
 } else if (scenario === "large") {
   answer("stop", [{ type: "text", text: "evidence ".repeat(4000) }]); settle();
+} else if (scenario.startsWith("blank-")) {
+  answer("stop", [{ type: "text", text: blank(scenario) }]); settle();
 } else if (scenario === "ranges") {
   for (const args of [
     { path: "/fixture/source.ts", offset: 1, limit: 200, content: "DO_NOT_RETAIN_CONTENT" },
@@ -37,13 +40,15 @@ if (scenario === "success") {
   const update = (type, fields) => emit({ type: "message_update", assistantMessageEvent: { type, ...fields, partial: { content: [{ type: "text", text: "PRIVATE_SNAPSHOT_DO_NOT_RETAIN" }] } } });
   update("thinking_delta", { contentIndex: 1, delta: "PRIVATE_REASONING_DO_NOT_RETAIN" });
   update("toolcall_delta", { contentIndex: 3, delta: "PRIVATE_PAYLOAD_DO_NOT_RETAIN" });
-  if (scenario !== "stream-thinking-hang") {
+  if (scenario === "stream-blank-final") update("text_delta", { contentIndex: 0, delta: blank("spaces") });
+  else if (scenario !== "stream-thinking-hang") {
     update("text_delta", { contentIndex: 0, delta: "Stream A" });
     update("text_end", { contentIndex: 0, content: "Stream corrected ñ🙂" });
     update("text_delta", { contentIndex: 2, delta: "Second block" });
     if (scenario === "stream-large-hang") update("text_delta", { contentIndex: 2, delta: "ñ🙂 public ".repeat(3000) });
   }
-  if (scenario === "stream-empty-final") { answer("stop", []); settle(); }
+  if (scenario === "stream-blank-final") { answer("stop", [{ type: "text", text: blank("spaces") }]); settle(); }
+  else if (scenario === "stream-empty-final") { answer("stop", []); settle(); }
   else if (scenario === "stream-valid-final") { answer(); settle(); }
   else {
     process.on("SIGTERM", () => {});
@@ -60,7 +65,8 @@ if (scenario === "success") {
   answer("toolUse", []);
   answer("toolUse", [{ type: "text", text: " \n\t " }]);
   answer("toolUse", [{ type: "toolCall", name: "read", arguments: { path: "PRIVATE_PAYLOAD_DO_NOT_RETAIN" } }]);
-  if (scenario === "partial-empty-final") { answer("stop", []); settle(); }
+  if (scenario.startsWith("partial-blank-")) { answer("stop", [{ type: "text", text: blank(scenario) }]); settle(); }
+  else if (scenario === "partial-empty-final") { answer("stop", []); settle(); }
   else if (scenario === "partial-spaces-final") { answer("stop", [{ type: "text", text: " \n\t " }]); settle(); }
   else if (scenario === "partial-thinking-final") { answer("stop", [{ type: "thinking", thinking: "PRIVATE_REASONING_DO_NOT_RETAIN" }]); settle(); }
   else if (scenario === "partial-valid-final") { answer(); settle(); }

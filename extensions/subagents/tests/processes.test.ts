@@ -1,25 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { processSpec, requireWindowsHelper, spawnManaged, WINDOWS_JOB_HELPER } from "../processes.ts";
+import { processSpec, requireWindowsHelper, spawnManaged, WINDOWS_JOB_HELPER, POSIX_SUPERVISOR } from "../processes.ts";
 
 const treeFixture = fileURLToPath(new URL("./fixtures/process-tree.mjs", import.meta.url));
 const ownerFixture = fileURLToPath(new URL("./fixtures/managed-owner.mjs", import.meta.url));
 const nativeSkip = process.platform !== "win32" ? "Windows Job Object integration requires Windows" :
   !existsSync(WINDOWS_JOB_HELPER) ? "Build the Windows helper explicitly before native tests" : false;
 
-test("POSIX process plan preserves direct argv and an owned process group", () => {
+test("POSIX process plan reuses the owner runtime for the private-channel supervisor", () => {
   const args = ["a b", "ñ🙂", "literal & | $ % !", ""];
   const plan = processSpec("/usr/bin/node", args, "linux");
-  assert.equal(plan.command, "/usr/bin/node");
-  assert.deepEqual(plan.args, args);
-  assert.notEqual(plan.args, args);
+  assert.equal(plan.command, process.execPath);
+  assert.equal(plan.args[0], "--eval");
+  assert.ok(plan.args[1].includes(new URL("../posix-supervisor.mjs", import.meta.url).href));
+  assert.ok(!plan.args.includes(args[0]), "launch data is sent only after the supervisor handshake");
   assert.equal(plan.detached, true);
+  assert.ok(existsSync(POSIX_SUPERVISOR));
 });
 
 test("Windows process plan uses the fixed controller and preserves argv without a shell", () => {
@@ -77,8 +79,12 @@ function firstPids(child: ReturnType<typeof spawn>): Promise<number[]> {
   });
 }
 function isAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
+  try {
+    process.kill(pid, 0);
+    // A terminated Linux orphan can remain as a zombie until its adopter reaps it.
+    return process.platform !== "linux" || !readFileSync(`/proc/${pid}/stat`, "utf8").includes(") Z ");
+  }
+  catch (error) { if (["ESRCH", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) return false; throw error; }
 }
 async function assertTerminated(pids: number[]) {
   for (let attempt = 0; attempt < 100 && pids.some(isAlive); attempt++) await delay(20);
@@ -89,6 +95,88 @@ function emergencyCleanup(pids: number[]) {
     try { process.kill(pid, "SIGKILL"); } catch { /* already terminated */ }
   }
 }
+
+test("POSIX supervisor preserves argv, stdin and environment without sharing the lifetime channel", { skip: process.platform === "win32", timeout: 15_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "stela posix ñ space-"));
+  const script = join(dir, "argv ñ fixture.mjs");
+  const args = ["", "space value", 'embedded"quote', "trailing\\", "ñ🙂 & | % !"];
+  writeFileSync(script, `import { readFileSync } from "node:fs"; console.log(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), marker: process.env.STELA_TEST_MARKER, bunBeBun: process.env.BUN_BE_BUN ?? null, input: readFileSync(0, "utf8") }));`);
+  const env = { ...process.env, STELA_TEST_MARKER: "inherited ñ", BUN_BE_BUN: "original-value" };
+  const managed = spawnManaged(process.execPath, [script, ...args], { cwd: dir, env });
+  const done = closed(managed.child);
+  let stdout = ""; let stderr = "";
+  managed.child.stdout.on("data", (chunk) => { stdout += chunk; });
+  managed.child.stderr.on("data", (chunk) => { stderr += chunk; });
+  managed.child.stdin.end("bounded assignment ñ🙂");
+  try {
+    assert.equal((await done).code, 0, stderr);
+    assert.deepEqual(JSON.parse(stdout), { args, cwd: dir, marker: "inherited ñ", bunBeBun: "original-value", input: "bounded assignment ñ🙂" });
+  } finally { managed.cleanup(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+for (const action of ["leader-exit", "terminate", "force-terminate", "supervisor-exit"] as const) {
+  test(`POSIX supervisor removes descendants retaining stdio on ${action}`, { skip: process.platform === "win32", timeout: 15_000 }, async () => {
+    const managed = spawnManaged(process.execPath, [treeFixture, action === "leader-exit" ? "exit" : "hang"], { cwd: process.cwd(), env: process.env });
+    const done = closed(managed.child);
+    const pidsPromise = firstPids(managed.child);
+    let pids: number[] = [];
+    managed.child.stderr.resume(); managed.child.stdin.end();
+    try {
+      pids = await pidsPromise;
+      assert.equal(pids.length, 3);
+      if (action === "terminate") managed.terminate();
+      if (action === "force-terminate") managed.forceTerminate();
+      if (action === "supervisor-exit") managed.child.kill("SIGKILL");
+      const result = await done;
+      if (action === "leader-exit") assert.equal(result.code, 0);
+      await assertTerminated([...pids, managed.child.pid!]);
+    } finally { managed.cleanup(); emergencyCleanup(pids); }
+  });
+}
+
+test("POSIX supervisor survives abrupt owner death and removes the full tree", { skip: process.platform === "win32", timeout: 15_000 }, async () => {
+  const owner = spawn(process.execPath, [ownerFixture, "with-supervisor"], { stdio: ["pipe", "pipe", "pipe"] });
+  const done = closed(owner);
+  let pids: number[] = [];
+  owner.stderr.resume(); owner.stdin.end();
+  try {
+    pids = await firstPids(owner);
+    assert.equal(pids.length, 4, "the supervisor and all three target processes must be tracked");
+    owner.kill("SIGKILL");
+    await done;
+    await assertTerminated(pids);
+  } finally { owner.kill("SIGKILL"); emergencyCleanup(pids); }
+});
+
+test("POSIX owner death before supervisor readiness never starts the target", { skip: process.platform === "win32", timeout: 15_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "stela-posix-startup-"));
+  const marker = join(dir, "must-not-exist");
+  const owner = spawn(process.execPath, [ownerFixture, "startup-exit", marker], { stdio: ["pipe", "pipe", "pipe"] });
+  const done = closed(owner);
+  let pids: number[] = [];
+  owner.stderr.resume(); owner.stdin.end();
+  try {
+    pids = await firstPids(owner);
+    assert.equal(pids.length, 1, "the fixture reports only the not-yet-ready supervisor");
+    await done;
+    await assertTerminated(pids);
+    assert.equal(existsSync(marker), false);
+  } finally { owner.kill("SIGKILL"); emergencyCleanup(pids); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("POSIX cancellation before readiness never starts the target", { skip: process.platform === "win32", timeout: 15_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "stela-posix-cancel-"));
+  const marker = join(dir, "must-not-exist");
+  const managed = spawnManaged(process.execPath, ["-e", "require('node:fs').writeFileSync(process.argv[1], 'unexpected')", marker], { cwd: dir, env: process.env });
+  const done = closed(managed.child);
+  managed.child.stdout.resume(); managed.child.stderr.resume(); managed.child.stdin.end();
+  managed.forceTerminate();
+  try {
+    await done;
+    assert.equal(existsSync(marker), false);
+    await assertTerminated([managed.child.pid!]);
+  } finally { managed.cleanup(); rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("Windows native controller preserves spaces, Unicode, quotes and shell metacharacters", { skip: nativeSkip, timeout: 15_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "stela native ñ space-"));

@@ -320,7 +320,7 @@ test("JSON runner retains bounded read ranges but not source contents or unrelat
   assert.doesNotMatch(result.trace.join("\n"), /DO_NOT_RETAIN_CONTENT/);
 });
 
-for (const scenario of ["partial-empty-final", "partial-spaces-final", "partial-thinking-final", "partial-restarted"]) {
+for (const scenario of ["partial-empty-final", "partial-spaces-final", "partial-thinking-final", "partial-restarted", "partial-blank-spaces", "partial-blank-controls", "partial-blank-unicode"]) {
   test(`JSON runner retains partial text without false completion for ${scenario}`, async () => {
     const result = await runChild(options(scenario));
     assert.equal(result.status, "failed");
@@ -328,8 +328,20 @@ for (const scenario of ["partial-empty-final", "partial-spaces-final", "partial-
     if (scenario === "partial-restarted") assert.match(result.output, /Answer: bounded evidence/);
     else assert.equal(result.output, "Partial evidence B: ñ🙂");
     assert.doesNotMatch(result.output, /Older public text A|PRIVATE_/);
+    assert.equal(result.truncated, false, "a blank final must not change the retained partial metadata");
     const formatted = formatResult({ id: "partial", assignment, state: "failed", delivered: false, sourcesMayHaveChanged: false, result });
     assert.match(formatted, /Partial evidence only/);
+  });
+}
+
+for (const scenario of ["blank-spaces", "blank-controls", "blank-unicode", "stream-blank-final"]) {
+  test(`JSON runner rejects oversized blank text without manufacturing evidence for ${scenario}`, async () => {
+    const result = await runChild(options(scenario));
+    assert.equal(result.status, "failed");
+    assert.match(result.error!, /nonempty final answer/);
+    assert.equal(result.output, scenario === "stream-blank-final" ? "Earlier public evidence" : "");
+    assert.equal(result.truncated, false);
+    assert.doesNotMatch(result.output, /Truncated/);
   });
 }
 
