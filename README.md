@@ -1,6 +1,6 @@
 # StelaShell
 
-StelaShell is a personalized environment built around Pi. The current implementation includes the standalone FARO method, project-continuity reminders, a bounded read-only subagent core, and local primary-session messaging with shared TypeScript policy/protocol, POSIX IPC and a protected native Windows backend. The user accepted and published continuity v1 and reports the first version configured; this is not a guarantee of model adherence.
+StelaShell is a personalized environment built around Pi. The current implementation includes the standalone FARO method, project-continuity reminders, a bounded read-only subagent core, and local primary-session messaging with shared TypeScript policy/protocol, POSIX IPC and a protected native Windows backend. It also provides a bounded public-URL reader in TypeScript/Node, without a search provider or new Rust component. The user accepted and published continuity v1 and reports the first version configured; this is not a guarantee of model adherence.
 
 For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) for the consolidated decisions and roadmap, then [Work state](docs/WORK_STATE.md) for current outcomes and open questions. These documents are usable without access to the previous chat or Engram database.
 
@@ -20,9 +20,16 @@ For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) f
 | `extensions/subagents/assets/helper.md` | The single reusable `stela-helper` instruction contract. |
 | `extensions/subagents/tests/` | Node tests and opt-in native Pi integration with a deterministic local provider. |
 | `extensions/sessions/` | Primary-session discovery, authenticated local messaging, bounded automatic replies and session lifecycle integration. See its [operation, limits and platform status](extensions/sessions/README.md). |
-| `package.json` | Declares the three extension entry points and explicit test/helper-build commands. No npm dependencies are added. |
+| `extensions/web/` | Public HTTPS URL reading, bounded extraction, source metadata and network policy. See its [operation and limits](extensions/web/README.md). |
+| `package.json` / `package-lock.json` | Four extension entry points, tests/helper-build commands and the user-approved exact `htmlparser2` dependency with locked transitives. |
 
 The method extension supplies instructions; it does not enforce permissions, Git restrictions, or agent behavior. Changes to the Markdown require reloading the extension. The user's configuration report and source checks remain distinct from independently observed live behavior.
+
+## Public URL reading
+
+`stela_read_url` reads a known public HTML/plain-text/Markdown URL and returns a source ID, final URL, retrieval time and bounded text. It is not web search, a browser or a claim of version compatibility. HTTPS-only, validated/pinned public destinations, explicit TLS checks, redirect/decompression limits and cancellable extraction belong to the Node implementation; no Rust helper, paid API or MCP server is needed. Helpers remain excluded.
+
+The user approved local `htmlparser2`/transitives; another authorized checkout setup can use `npm ci --ignore-scripts --no-audit --no-fund`. No automatic install or profile activation occurs. The user separately authorized the Windows profile's single `extensions/stela-web` junction; it is created and verified without settings edits or a Pi reload. Run `/reload` or restart Pi to try the newly linked tool. See the [reader README](extensions/web/README.md) for arguments, bounds, evidence and loading options.
 
 ## Subagent core
 
@@ -141,7 +148,7 @@ Those historical checks do not validate later changes, the live Pi loader, reloa
 - Reload the active profile after creating its development link. Live-provider/TUI observation requires its corresponding authorization and is not established by the isolated integration checks. Delegated writing, additional integrations and other roadmap capabilities remain outside this core.
 - Check integration when the target environment changes or a concrete issue requires it, rather than repeating an unrelated full-environment audit.
 
-Pi remains the agent. Rust is used only for the Windows process controller in this implementation; no general Rust launcher or installer is provided. The read-only subagent core is implemented; memory integrations and delegated writing are not.
+Pi remains the agent. Rust is limited to the Windows process and session-IPC controllers; the URL reader uses TypeScript/Node. No general Rust launcher or installer is provided. The read-only subagent core is implemented; memory integrations and delegated writing are not.
 
 ## Working agreements
 
