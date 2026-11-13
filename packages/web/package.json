@@ -1,0 +1,16 @@
+{
+  "name": "stela-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stela-owned web search and page reading based on pi-web-access.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": []
+  }
+}

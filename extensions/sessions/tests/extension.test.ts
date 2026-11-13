@@ -160,9 +160,14 @@ test("metadata hooks await the transport and late completion cannot reactivate a
   assert.equal(h.transports[0].closed, true); assert.equal(h.transports.length, 1);
   await assert.rejects(h.tools.get("stela_sessions").execute("list", {}, undefined, undefined, h.ctx), /unavailable/);
 });
-test("package retains session registration/tests and only the approved HTML parser dependency", () => {
+test("package retains session registration/tests and excludes the retired web integration", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
-  assert.ok(manifest.pi.extensions.includes("./extensions/sessions/index.ts"));
+  assert.deepEqual(manifest.pi.extensions, [
+    "./extensions/method/index.ts",
+    "./extensions/subagents/index.ts",
+    "./extensions/sessions/index.ts",
+  ]);
   assert.match(manifest.scripts.test, /extensions\/sessions\/tests\/\*\.test\.ts/);
-  assert.deepEqual(manifest.dependencies, { htmlparser2: "12.0.0" });
+  assert.doesNotMatch(manifest.scripts.test, /extensions\/web\//);
+  assert.deepEqual(manifest.dependencies ?? {}, {});
 });
