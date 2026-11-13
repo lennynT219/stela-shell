@@ -52,13 +52,19 @@ stela-shell/
     ├── method/
     │   ├── index.ts
     │   └── assets/method.md
-    └── subagents/
+    ├── subagents/
+    │   ├── index.ts
+    │   ├── runner.ts
+    │   ├── processes.ts
+    │   ├── posix-supervisor.mjs
+    │   ├── tasks.ts
+    │   ├── assets/helper.md
+    │   └── tests/
+    └── sessions/
         ├── index.ts
-        ├── runner.ts
-        ├── processes.ts
-        ├── posix-supervisor.mjs
-        ├── tasks.ts
-        ├── assets/helper.md
+        ├── messages.ts
+        ├── transport.ts
+        ├── README.md
         └── tests/
 ```
 
@@ -174,6 +180,10 @@ The read-only comparison is complete. StelaShell implements its own extension us
 - Only the parent's active, unmodified native readers are eligible, with reference-path checks in the child. The child inherits recognized native Pi resource flags and loaded controls; unknown launch flags, remote `-e` sources and unsupported SDK/bridge/source launchers fail rather than silently dropping policy. This is not an OS sandbox or a mechanism for transferring transient consent.
 - The source lives in `extensions/subagents/`; the shared runner delegates process ownership to `processes.ts`. POSIX uses `posix-supervisor.mjs` with the owner's exact JS runtime, a private IPC launch/lifetime handshake and a separate target process group. Owner death closes IPC and kills the target group; normal cancellation retains TERM/KILL escalation, and leader exit cleans descendants retaining pipes. No shell, extra installed runtime or model session is used. This is user-space supervision, not atomic protection against simultaneous owner/supervisor loss or escaped process groups. Windows 10+ uses an explicitly built Rust Job Object controller in `native/windows-job/`. Creation assigns the suspended child to the Job atomically, before resume; missing artifacts or containment failures do not fall back to an uncontrolled launch. Cancellation and parent-death cleanup belong to the controller. Windows termination is immediate rather than POSIX graceful signaling. Arbitrary bridge compatibility remains unsupported.
 - The user authorized the Windows helper in Rust with `windows-sys`, Cargo dependency downloads, local compilation, and runner/test/documentation changes, as well as commit/push of this delivery and its single development link in the active StelaShell profile. This is not standing authorization for later publication or other profile changes. The helper is never downloaded or compiled automatically during delegation; no npm dependency is added. Global tool installation, live-provider validation, performance comparisons and delegated writing remain separately scoped. WORK_STATE distinguishes source implementation, compiler checks, link verification and actual per-OS runtime validation.
+
+### Independent primary-session messaging
+
+The user separately authorized an owned TypeScript capability for automatic local communication between primary sessions in the same profile, with no approval prompt per peer or message. `extensions/sessions/` integrates with Pi and uses Node built-ins; no general Rust bridge or messaging daemon was selected. The helper contract above is unchanged: helpers are excluded before presence/IPC startup and parent/helper dialogue is deferred. The user's collaboration policy authorizes concrete peer requests as actionable delegated tasks using the receiver's own available tools and permissions, including ordinary file edits, commands and proportional bounded helper assignments. A new human prompt is not required solely because a task came from a peer. Messages retain peer provenance and cannot transfer permissions, override direct user restrictions or denials, or provide required human approval for protected actions. Helpers remain read-only over authorized existing references; this does not add web capabilities. Consult the [session extension README](../extensions/sessions/README.md) for the tools, bounds and loading instructions, and WORK_STATE for current evidence. Windows transport fails closed pending native protections; Linux observations are not Windows/macOS/TUI certification. Profile activation, dependencies, real-provider experiments and publication need their corresponding authorization.
 
 Concrete specialized child models, profiles, costs, and effort policies remain undecided or unverified. A global metadata audit was denied and then explicitly deferred. Do not resume it automatically or route around that denial. Its recorded error was: `Permission configuration is human-controlled. Use the mode settings UI; model tools cannot change it.` Historical permission is not current runtime consent.
 

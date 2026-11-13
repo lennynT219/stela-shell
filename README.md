@@ -1,6 +1,6 @@
 # StelaShell
 
-StelaShell is a personalized environment built around Pi. The current implementation includes the standalone FARO method, project-continuity reminders, and a first read-only subagent core. The user accepted and published continuity v1 and reports the first version configured; this is not a guarantee of model adherence.
+StelaShell is a personalized environment built around Pi. The current implementation includes the standalone FARO method, project-continuity reminders, a bounded read-only subagent core, and local primary-session messaging (Linux-verified; Windows transport fails closed pending native protections). The user accepted and published continuity v1 and reports the first version configured; this is not a guarantee of model adherence.
 
 For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) for the consolidated decisions and roadmap, then [Work state](docs/WORK_STATE.md) for current outcomes and open questions. These documents are usable without access to the previous chat or Engram database.
 
@@ -18,7 +18,8 @@ For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) f
 | `extensions/subagents/tasks.ts` | Owns the in-memory queue, deduplication and concurrency limit. |
 | `extensions/subagents/assets/helper.md` | The single reusable `stela-helper` instruction contract. |
 | `extensions/subagents/tests/` | Node tests and opt-in native Pi integration with a deterministic local provider. |
-| `package.json` | Declares both extension entry points and explicit test/helper-build commands. No npm dependencies are added. |
+| `extensions/sessions/` | Primary-session discovery, authenticated local messaging, bounded automatic replies and session lifecycle integration. See its [operation, limits and platform status](extensions/sessions/README.md). |
+| `package.json` | Declares the three extension entry points and explicit test/helper-build commands. No npm dependencies are added. |
 
 The method extension supplies instructions; it does not enforce permissions, Git restrictions, or agent behavior. Changes to the Markdown require reloading the extension. The user's configuration report and source checks remain distinct from independently observed live behavior.
 
@@ -93,6 +94,14 @@ STELA_TEST_PI_CLI=/absolute/path/to/pi-coding-agent/dist/bundle/cli.js npm test
 ```
 
 Without that variable, native integration tests are explicitly skipped. Temporary test state is cleaned up. Live behavior with the user's provider/profile, terminal presentation, and any speed/context benefit still require their own observation; the deterministic integration is not proof of model adherence or improved performance.
+
+## Primary-session communication
+
+The owned [session extension](extensions/sessions/README.md) provides `stela_sessions` and `stela_message` for live primary activations in the same canonical profile. Incoming messages and replies can activate a model automatically **without a per-peer/message approval dialog**. Under the user's collaboration policy, concrete peer requests are actionable delegated tasks: the receiver can use its own tools for file edits, commands and bounded helper assignments without asking for a fresh human prompt solely because the request came from a peer. Messages keep their peer provenance, do not transfer permissions or satisfy human-only approval requirements, and cannot override direct user restrictions or denials. Busy delivery waits for completed tool/turn boundaries. Helpers are excluded before resource startup.
+
+The transport is direct local IPC, with private presence/capabilities, authenticated encrypted payloads, bounded inbox/history/conversation limits, and no daemon or automatic retries. Acceptance is not proof of reading/completion. `/stela-sessions` shows peers; `off` closes the activation and `on` starts a fresh one. `--stela-sessions-disabled` disables presence and delivery for an invocation.
+
+Linux mechanism and native Pi RPC behavior are tested with an isolated deterministic provider. Windows deliberately remains unavailable until its native protection boundary is implemented and verified; macOS and real TUI/model behavior are unverified. The manifest does not add a profile link or reload an existing instance. See the extension README for loading instructions and [Work state](docs/WORK_STATE.md) for verification/review limitations.
 
 ## Resume on another computer
 
