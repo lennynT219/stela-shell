@@ -150,6 +150,16 @@ test("presentation failures cannot change admission or prevent teardown; navigat
   await h.emit("session_shutdown"); assert.equal(h.transports[0].closed, true);
 });
 
+test("metadata hooks await the transport and late completion cannot reactivate a closed generation", async () => {
+  const h = harness(); await h.emit("session_start");
+  let finish!: () => void, completed = false;
+  h.transports[0].update = () => new Promise<void>((resolve) => { finish = resolve; });
+  const updating = h.emit("session_info_changed").then(() => { completed = true; });
+  await tick(); assert.equal(completed, false);
+  await h.emit("session_shutdown"); finish(); await updating;
+  assert.equal(h.transports[0].closed, true); assert.equal(h.transports.length, 1);
+  await assert.rejects(h.tools.get("stela_sessions").execute("list", {}, undefined, undefined, h.ctx), /unavailable/);
+});
 test("package declares the session extension and includes its tests without new dependencies", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
   assert.ok(manifest.pi.extensions.includes("./extensions/sessions/index.ts"));

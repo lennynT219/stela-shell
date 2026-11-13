@@ -1,58 +1,12 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
-import { envelope, exactKeys, identifier, newId, object, type Envelope, type PeerInfo } from "./messages.ts";
-
-// Worst-case JSON escaping of an 8 KiB message, then hex ciphertext, still fits.
-export const MAX_FRAME_BYTES = 128 * 1024;
-export const MAX_RECORD_BYTES = 4096;
-export const MAX_SCAN_ENTRIES = 128;
-export const MAX_PEERS = 32;
-export const IO_DEADLINE_MS = 2000;
-const MAX_CONNECTIONS = 8, MAX_OUTBOUND = 4;
-const HEX64 = /^[a-f0-9]{64}$/;
-interface Presence extends PeerInfo { version: 1; pid: number; secret: string }
-interface Packet { version: 1; id: string; from: string; to: string; nonce: string; data: string; tag: string; proof: string }
-export interface Receipt { accepted: boolean; duplicate?: boolean; error?: string }
-type Payload = { kind: "ping" } | { kind: "message"; message: Envelope };
-
+import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
+import { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS, MAX_CONNECTIONS, MAX_OUTBOUND,
+  answer, boundedString, encode, presence, publicPeer, receipt, seal, type Payload, type Presence, type Receipt, type SessionTransport } from "./protocol.ts";
+export { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS } from "./protocol.ts";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
-const sign = (key: string, value: unknown) => createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify(value)).digest("hex");
-function matches(actual: unknown, expected: string): boolean {
-  return typeof actual === "string" && HEX64.test(actual) && timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
-}
-function header(packet: Packet) { return { version: packet.version, id: packet.id, from: packet.from, to: packet.to }; }
-function unsigned(packet: Packet) { return { ...header(packet), nonce: packet.nonce, data: packet.data, tag: packet.tag }; }
-function packet(value: unknown): Packet {
-  const data = object(value);
-  exactKeys(data, ["version", "id", "from", "to", "nonce", "data", "tag", "proof"]);
-  if (data.version !== 1 || typeof data.nonce !== "string" || !/^[a-f0-9]{24}$/.test(data.nonce) || typeof data.tag !== "string" || !/^[a-f0-9]{32}$/.test(data.tag) || typeof data.data !== "string" || (data.data.length < 2 || data.data.length > 128 * 1024 || data.data.length % 2 !== 0 || !/^[a-f0-9]+$/.test(data.data)) || typeof data.proof !== "string" || !HEX64.test(data.proof)) throw new Error("Invalid transport packet.");
-  return { version: 1, id: identifier(data.id), from: identifier(data.from), to: identifier(data.to), nonce: data.nonce, data: data.data, tag: data.tag, proof: data.proof };
-}
-function seal(from: Presence, to: Presence, payload: Payload): Packet {
-  const base = { version: 1 as const, id: newId(), from: from.id, to: to.id };
-  const nonce = randomBytes(12), cipher = createCipheriv("aes-256-gcm", Buffer.from(to.secret, "hex"), nonce);
-  cipher.setAAD(Buffer.from(JSON.stringify(base)));
-  const data = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]).toString("hex");
-  const fields = { ...base, nonce: nonce.toString("hex"), data, tag: cipher.getAuthTag().toString("hex") };
-  return { ...fields, proof: sign(from.secret, fields) };
-}
-function unseal(value: Packet, own: Presence): Payload {
-  const decipher = createDecipheriv("aes-256-gcm", Buffer.from(own.secret, "hex"), Buffer.from(value.nonce, "hex"));
-  decipher.setAAD(Buffer.from(JSON.stringify(header(value))));
-  decipher.setAuthTag(Buffer.from(value.tag, "hex"));
-  const data = object(JSON.parse(Buffer.concat([decipher.update(Buffer.from(value.data, "hex")), decipher.final()]).toString("utf8")));
-  exactKeys(data, data.kind === "ping" ? ["kind"] : ["kind", "message"]);
-  if (data.kind === "ping") return { kind: "ping" };
-  if (data.kind !== "message") throw new Error("Invalid request kind.");
-  return { kind: "message", message: envelope(data.message) };
-}
-function encode(value: unknown): Buffer {
-  const result = Buffer.from(JSON.stringify(value) + "\n");
-  if (result.length > MAX_FRAME_BYTES) throw new Error("Transport frame limit exceeded.");
-  return result;
-}
 /** Exactly one bounded JSON line. Absolute deadlines also cover clients that send no bytes. */
 function readFrame(socket: Socket, consume: (data: unknown) => void, fail: () => void): void {
   let buffer = Buffer.alloc(0), done = false;
@@ -84,17 +38,11 @@ function safeAncestors(path: string): void {
     if (dirname(current) === current) break;
   }
 }
-function boundedString(value: unknown, max: number): string {
-  if (typeof value !== "string" || Buffer.byteLength(value) > max) throw new Error("Invalid presence metadata.");
-  return value;
-}
-export function publicPeer(value: Presence): PeerInfo { return { id: value.id, sessionId: value.sessionId, name: value.name, cwd: value.cwd }; }
-
-/** Endpoint derivation never accepts a caller/record-supplied address. Not a Windows runtime test. */
+/** POSIX endpoint derivation. Windows requires handle-validated native profile identity. */
 export function endpointName(profile: string, id: string, platform: NodeJS.Platform = process.platform): string {
   identifier(id);
-  const profileHash = hash(platform === "win32" ? profile.toLowerCase() : profile);
-  if (platform === "win32") return `\\\\.\\pipe\\stela-${profileHash}-${id}`;
+  if (platform === "win32") throw new Error("Windows endpoints require validated native profile identity, not a string path.");
+  const profileHash = hash(profile);
   return join(realpathSync("/tmp"), `stela-${process.getuid!()}-${profileHash}`, `${id}.sock`);
 }
 
@@ -114,8 +62,8 @@ export class PeerTransport {
   private onMessage: (from: PeerInfo, message: Envelope) => "accepted" | "duplicate";
 
   private constructor(profile: string, info: Omit<PeerInfo, "id">, onMessage: PeerTransport["onMessage"]) {
-    // Node alone does not establish Windows DACLs/remote-client rejection. Fail before I/O.
-    if (process.platform === "win32" || typeof process.getuid !== "function") throw new Error("Stela session transport is unavailable on Windows until native profile/pipe protections are implemented and verified.");
+    // This class is POSIX-only; open() selects the protected native Windows backend.
+    if (process.platform === "win32" || typeof process.getuid !== "function") throw new Error("POSIX session transport requires native account/permission APIs; use the platform factory.");
     this.profile = realpathSync(profile);
     safeAncestors(this.profile);
     this.root = join(this.profile, "stela-sessions");
@@ -131,8 +79,9 @@ export class PeerTransport {
     this.server = createServer((socket) => this.connection(socket));
     this.server.on("error", () => { /* listen errors reject open(); later errors leave sends unconfirmed */ });
   }
-  static async open(profile: string, info: Omit<PeerInfo, "id">, receive: PeerTransport["onMessage"], signal?: AbortSignal): Promise<PeerTransport> {
+  static async open(profile: string, info: Omit<PeerInfo, "id">, receive: PeerTransport["onMessage"], signal?: AbortSignal): Promise<SessionTransport> {
     signal?.throwIfAborted();
+    if (process.platform === "win32") return (await import("./transport-windows.ts")).WindowsTransport.open(profile, info, receive, signal);
     const transport = new PeerTransport(profile, info, receive);
     try {
       await new Promise<void>((resolve, reject) => {
@@ -175,10 +124,7 @@ export class PeerTransport {
       if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_RECORD_BYTES) throw new Error("Unsafe presence record.");
       const bytes = Buffer.alloc(MAX_RECORD_BYTES + 1), size = readSync(fd, bytes, 0, bytes.length, 0);
       if (size > MAX_RECORD_BYTES) throw new Error("Presence record is too large.");
-      const data = object(JSON.parse(bytes.subarray(0, size).toString("utf8")));
-      exactKeys(data, ["version", "id", "sessionId", "name", "cwd", "pid", "secret"]);
-      if (data.version !== 1 || data.id !== id || typeof data.secret !== "string" || !HEX64.test(data.secret) || !Number.isSafeInteger(data.pid) || (data.pid as number) <= 0) throw new Error("Invalid presence record.");
-      return { version: 1, id, secret: data.secret, pid: data.pid as number, sessionId: boundedString(data.sessionId, 128), name: boundedString(data.name, 256), cwd: boundedString(data.cwd, 1024) };
+      return presence(JSON.parse(bytes.subarray(0, size).toString("utf8")), id);
     } catch { throw new Error("Peer presence is unavailable or unsafe."); }
     finally { if (fd !== undefined) closeSync(fd); }
   }
@@ -199,19 +145,10 @@ export class PeerTransport {
     socket.on("error", () => {});
     socket.once("close", () => { clearTimeout(deadline); this.incoming.delete(socket); });
     readFrame(socket, (raw) => {
-      const request = packet(raw);
-      if (request.to !== this.own.id || this.closed) throw new Error("Wrong activation.");
-      // Decrypt before sender lookup; outsiders without the recipient capability cannot force reads.
-      // A squatted endpoint cannot read message text or forge a valid acknowledgment.
-      const payload = unseal(request, this.own), sender = this.readPresence(request.from);
-      if (!matches(request.proof, sign(sender.secret, unsigned(request)))) throw new Error("Sender authentication failed.");
-      let receipt: Receipt = { accepted: true };
-      if (payload.kind === "message") {
-        try { receipt = { accepted: true, duplicate: this.onMessage(publicPeer(sender), payload.message) === "duplicate" }; }
-        catch { receipt = { accepted: false, error: "Recipient rejected the message (budget, lineage, inbox or session state)." }; }
-      }
-      const response = { version: 1, id: request.id, from: this.own.id, to: request.from, ...receipt };
-      socket.end(encode({ ...response, proof: sign(this.own.secret, response) }));
+      void answer(raw, this.own, (id) => this.readPresence(id), (from, message) => {
+        if (this.closed) throw new Error("Session closed.");
+        return this.onMessage(from, message);
+      }).then((bytes) => { if (!this.closed && !socket.destroyed) socket.end(bytes); else socket.destroy(); }, () => socket.destroy());
     }, () => socket.destroy());
   }
   private async request(peer: Presence, payload: Payload, signal?: AbortSignal): Promise<Receipt> {
@@ -238,10 +175,7 @@ export class PeerTransport {
       socket.on("error", () => finish(new Error("Peer unavailable; delivery unconfirmed. Do not automatically retry.")));
       socket.once("close", () => finish(new Error("Peer disconnected; delivery unconfirmed. Do not automatically retry.")));
       readFrame(socket, (raw) => {
-        const data = object(raw); exactKeys(data, ["version", "id", "from", "to", "accepted", "duplicate", "error", "proof"]);
-        const { proof, ...response } = data;
-        if (data.version !== 1 || data.id !== request.id || data.from !== peer.id || data.to !== this.own.id || typeof data.accepted !== "boolean" || (data.duplicate !== undefined && typeof data.duplicate !== "boolean") || (data.error !== undefined && (typeof data.error !== "string" || data.error.length > 256)) || !matches(proof, sign(peer.secret, response))) throw new Error("Invalid peer acknowledgment.");
-        finish(undefined, { accepted: data.accepted, ...(data.duplicate === undefined ? {} : { duplicate: data.duplicate as boolean }), ...(data.error === undefined ? {} : { error: data.error as string }) });
+        finish(undefined, receipt(raw, request, this.own.id, peer));
       }, () => finish(new Error("Invalid peer acknowledgment; delivery unconfirmed. Do not automatically retry.")));
     });
   }

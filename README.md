@@ -1,6 +1,6 @@
 # StelaShell
 
-StelaShell is a personalized environment built around Pi. The current implementation includes the standalone FARO method, project-continuity reminders, a bounded read-only subagent core, and local primary-session messaging (Linux-verified; Windows transport fails closed pending native protections). The user accepted and published continuity v1 and reports the first version configured; this is not a guarantee of model adherence.
+StelaShell is a personalized environment built around Pi. The current implementation includes the standalone FARO method, project-continuity reminders, a bounded read-only subagent core, and local primary-session messaging with shared TypeScript policy/protocol, POSIX IPC and a protected native Windows backend. The user accepted and published continuity v1 and reports the first version configured; this is not a guarantee of model adherence.
 
 For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) for the consolidated decisions and roadmap, then [Work state](docs/WORK_STATE.md) for current outcomes and open questions. These documents are usable without access to the previous chat or Engram database.
 
@@ -15,6 +15,7 @@ For a new development session, read [Project context](docs/PROJECT_CONTEXT.md) f
 | `extensions/subagents/processes.ts` | Platform-specific launch and cancellation: POSIX supervision or the Windows Job controller. |
 | `extensions/subagents/posix-supervisor.mjs` | Local owner-lifetime supervision and process-group cleanup; never runs a model. |
 | `native/windows-job/` | Windows-only Rust controller, dependency lockfile and argv-encoding tests. |
+| `native/windows-sessions/` | Separately built Windows session IPC/state protection; no daemon or changes to the Job controller. |
 | `extensions/subagents/tasks.ts` | Owns the in-memory queue, deduplication and concurrency limit. |
 | `extensions/subagents/assets/helper.md` | The single reusable `stela-helper` instruction contract. |
 | `extensions/subagents/tests/` | Node tests and opt-in native Pi integration with a deterministic local provider. |
@@ -101,7 +102,16 @@ The owned [session extension](extensions/sessions/README.md) provides `stela_ses
 
 The transport is direct local IPC, with private presence/capabilities, authenticated encrypted payloads, bounded inbox/history/conversation limits, and no daemon or automatic retries. Acceptance is not proof of reading/completion. `/stela-sessions` shows peers; `off` closes the activation and `on` starts a fresh one. `--stela-sessions-disabled` disables presence and delivery for an invocation.
 
-Linux mechanism and native Pi RPC behavior are tested with an isolated deterministic provider. Windows deliberately remains unavailable until its native protection boundary is implemented and verified; macOS and real TUI/model behavior are unverified. The manifest does not add a profile link or reload an existing instance. See the extension README for loading instructions and [Work state](docs/WORK_STATE.md) for verification/review limitations.
+Platform selection is automatic: POSIX uses Node; Windows uses a separately built Rust executable for handle-relative state, explicit DACLs and local named pipes with peer identity checks. Policy, crypto and admission stay in TypeScript. Missing artifacts/unsafe state fail closed, without downloads, compilation, ACL repair or unprotected fallback. Windows compatibility is exercised with actual native IPC and isolated deterministic Pi RPC; no new real-provider/TUI certification or completed independent security audit is claimed. The shared-protocol extraction still needs a fresh native Linux regression check; earlier Linux evidence is not a test of the new source.
+
+On Windows, use the same Rust/MSVC/Windows SDK prerequisites as the Job controller and build explicitly:
+
+```powershell
+npm run build:windows-sessions
+npm run test:windows-sessions
+```
+
+The artifact is `native/windows-sessions/target/release/stela-sessions.exe`, located through the extension's real checkout even when linked. It is independent of `stela-job.exe` and ignored by Git. End users can use a compatible prebuilt executable without installing Rust; no binary distribution/signing/update mechanism is added here. The manifest does not add a profile link or reload an existing instance. See the extension README for loading instructions and [Work state](docs/WORK_STATE.md) for current evidence and incomplete-review/platform limits.
 
 ## Resume on another computer
 

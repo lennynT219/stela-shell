@@ -1,6 +1,6 @@
 # Primary-session messaging
 
-An owned Stela capability using Pi's public extension API and Node built-ins. It connects **live primary sessions on the same machine and canonical Pi profile**, not helpers, archived conversations or remote agents. Pi remains the host; there is no broker daemon, new runtime dependency, Rust binary, blocking `ask`, or installed third-party distribution.
+An owned Stela capability using Pi's public extension API. It connects **live primary sessions on the same machine and canonical Pi profile**, not helpers, archived conversations or remote agents. Policy, Mailbox, crypto and wire validation are shared TypeScript. POSIX uses Node built-ins; Windows adds an explicitly built Rust executable for OS protections. Pi remains the host; there is no broker daemon, npm dependency, blocking `ask`, or installed third-party distribution.
 
 ## Operation
 
@@ -70,11 +70,24 @@ Presence is not liveness. Discovery probes each candidate once, with bounded con
 
 This is **not an OS sandbox or protection from hostile same-account code**, root, trusted extensions, hostile filesystem races or a compromised Pi process. Account permissions and canonical paths are part of the boundary. Peer text retains lower-trust provenance even after transport authentication.
 
-### Windows and macOS status
+### Windows
 
-**Windows transport deliberately fails closed before messaging filesystem/IPC creation.** Node's pipe APIs alone do not establish the required DACLs, reparse-point traversal, remote-client rejection or peer identity guarantees. Local pipe-name derivation is implemented/tested as protocol groundwork, not a working or security-verified Windows backend. Native protection/integration is a separate remaining outcome; it is not solved by changing this extension to Rust or assuming a default ACL.
+Windows 10+ uses `native/windows-sessions/`, one private bridge process per principal activation, not a daemon or the subagent Job controller. The binary uses the existing pinned windows-sys 0.61.2 family. It never runs a model, decides task permissions or acknowledges a message before TypeScript admission.
 
-The POSIX implementation is exercised on Linux. Native macOS path/permission behavior has not been verified. No native Windows/macOS compatibility certification is claimed.
+- A fixed local drive and a filesystem supporting persistent ACLs/file identity are required. The profile is opened component by component using handle-relative `NtCreateFile`; reparse points and unsafe ancestor grants are rejected. Handles anchor the namespace without following a separately checked string path. UNC/network/removable profiles are not supported.
+- New state/record objects get a protected, explicit user/SYSTEM DACL before contents are published. Existing unsafe ACLs are rejected, not repaired. Reads/publishing recheck the state DACL; records also require the expected owner, bounded size, no reparse point and a single hard link. Cooperative record locks prevent readers from accepting a partially updated record.
+- The pipe namespace hashes the current account SID and canonical profile volume/file identity, not just a lowercased path. Aliases to the same directory share a namespace; activation IDs are independently random. Windows endpoint derivation from an unvalidated string path is refused.
+- Named pipes use an explicit DACL, first-instance collision protection and `PIPE_REJECT_REMOTE_CLIENTS`. The native bridge verifies the client's effective SID/process and the server's SID/PID. The presence PID names the **native listener**, not Pi; Pi owner lifetime is monitored separately with an opened process handle. The existing per-activation encryption/HMAC remains required.
+- Private stdio framing is versioned and capped at 140 KiB, with 32 pending Node requests, bounded buffered writes and 8 incoming/4 outgoing pipe connections. Wire operations retain an absolute two-second deadline, including partial/idle clients and admission wait. There is no general model-callable native RPC or arbitrary endpoint/path operation.
+- Normal shutdown deletes only the originally opened own record by handle. EOF or owner death ends the bridge; native crashes/forced termination can leave private stale records, which discovery must probe and never ambiguously delete. Bridge failure makes operations unavailable, with no automatic restart/retry. Stop/start is an explicit operator action.
+
+Missing, unlaunchable or incompatible artifacts fail closed. Runtime never downloads, compiles, elevates, runs an ACL-repair command or falls back to unprotected Node pipes. Diagnostics exclude capabilities/messages. This is not a sandbox against hostile same-account/admin code, trusted extensions or a compromised host.
+
+Native Windows IPC, negative protection cases and two-Pi deterministic integration have been exercised. The independent native-boundary review exhausted its 240-second budget without an answer and is **incomplete**, not a certification or a running review. No retry was launched. Cross-account penetration, remote SMB attacks and broad OS-version/TUI/provider coverage are not established by these checks.
+
+### POSIX/macOS verification status
+
+The earlier POSIX implementation was exercised on Linux. The shared protocol/factory changes for Windows need a fresh native Linux regression check; Windows tests do not substitute for it. Native macOS path/permission behavior remains unverified.
 
 ## Loading and checks
 
@@ -86,7 +99,16 @@ For a one-invocation trial, in each terminal use the **same actual profile root*
 env PI_CODING_AGENT_DIR=/path/to/profile pi -e /path/to/stela-shell/extensions/sessions/index.ts
 ```
 
-For per-extension development loading, manually add one link for `extensions/sessions/` beside the existing method/subagents links and reload/restart Pi. Do not also load the same extension through a package or `-e`. The implementation work itself does not alter the habitual profile.
+For per-extension development loading, use one link for `extensions/sessions/` beside the existing method/subagents links and reload/restart Pi. Do not also load the same extension through a package or `-e`. Use the actual `PI_CODING_AGENT_DIR`, not an assumed extra `agent` directory. Profile-link creation requires its own authorization and does not itself reload a running session.
+
+For Windows, first build explicitly in a Visual Studio Developer PowerShell/Command Prompt with Rust 1.85+, MSVC C++ Build Tools and Windows SDK:
+
+```powershell
+npm run build:windows-sessions
+npm run test:windows-sessions
+```
+
+The required artifact is `native/windows-sessions/target/release/stela-sessions.exe`; keep the default target directory. A profile junction resolves back to the real checkout. The executable is not tracked by Git, so another machine must obtain/build it explicitly. POSIX needs no Rust build. Windows helper-delegation integration additionally needs the existing `npm run build:windows-helper` artifact.
 
 ```sh
 npm test

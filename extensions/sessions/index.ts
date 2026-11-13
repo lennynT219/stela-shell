@@ -1,10 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { formatMessage, Mailbox, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, type PeerInfo, type Received } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
+import type { OpenTransport, SessionTransport } from "./protocol.ts";
 
 export const MESSAGE_TYPE = "stela-peer-message";
 const WIDGET = "stela-sessions";
-interface Dependencies { profile: string; env?: NodeJS.ProcessEnv; open?: typeof PeerTransport.open }
+interface Dependencies { profile: string; env?: NodeJS.ProcessEnv; open?: OpenTransport }
 const result = (text: string, details: unknown) => ({ content: [{ type: "text" as const, text }], details });
 function preview(value: string, bytes: number): string {
   let output = "", used = 2;
@@ -23,7 +24,7 @@ function discoveryInfo(peer: PeerInfo): PeerInfo {
 export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): void {
   if ((dependencies.env ?? process.env).STELA_SUBAGENT_CHILD) return;
   const open = dependencies.open ?? PeerTransport.open;
-  let owner: ExtensionContext | undefined, ownerId: string | undefined, transport: PeerTransport | undefined;
+  let owner: ExtensionContext | undefined, ownerId: string | undefined, transport: SessionTransport | undefined;
   let mailbox = new Mailbox(), generation = 0, startup: AbortController | undefined;
   let inFlight: string | undefined, paused = false, disabled = false, unavailable = "Session has not started.";
 
@@ -112,7 +113,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   }
   pi.on("session_shutdown", stop);
   pi.on("session_tree", start); // New activation; no messages/grants cross navigation.
-  pi.on("session_info_changed", (_event, ctx) => { if (owns(ctx)) transport?.update(ctx.sessionManager.getSessionName() ?? ""); });
+  pi.on("session_info_changed", async (_event, ctx) => { if (owns(ctx)) await transport?.update(ctx.sessionManager.getSessionName() ?? ""); });
   pi.on("input", (event, ctx) => {
     if (owns(ctx) && (event.source === "interactive" || event.source === "rpc")) {
       mailbox.humanInput(); paused = false; widget();

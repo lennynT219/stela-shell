@@ -7,7 +7,9 @@
   "scripts": {
     "test": "node --experimental-strip-types --test extensions/subagents/tests/*.test.ts extensions/sessions/tests/*.test.ts",
     "build:windows-helper": "cargo build --locked --release --manifest-path native/windows-job/Cargo.toml",
-    "test:windows-helper": "cargo test --locked --manifest-path native/windows-job/Cargo.toml"
+    "test:windows-helper": "cargo test --locked --manifest-path native/windows-job/Cargo.toml",
+    "build:windows-sessions": "cargo build --locked --release --manifest-path native/windows-sessions/Cargo.toml",
+    "test:windows-sessions": "cargo test --locked --manifest-path native/windows-sessions/Cargo.toml"
   },
   "pi": {
     "extensions": [

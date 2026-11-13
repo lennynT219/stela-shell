@@ -7,8 +7,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { endpointName } from "../transport.ts";
 import { newId, PEER_TASK_POLICY } from "../messages.ts";
+import { WINDOWS_SESSIONS_HELPER } from "../transport-windows.ts";
 
 const cli = process.env.STELA_TEST_PI_CLI;
+const nativeAvailable = process.platform !== "win32" || existsSync(WINDOWS_SESSIONS_HELPER);
 const extension = fileURLToPath(new URL("../index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/provider.ts", import.meta.url));
 const subagents = fileURLToPath(new URL("../../subagents/index.ts", import.meta.url));
@@ -67,7 +69,7 @@ function client(profile: string, home: string, role: string, child = false, acti
 }
 const final = (marker: string) => (event: any) => event.type === "message_end" && event.message?.role === "assistant" && event.message.content.some((part: any) => part.type === "text" && part.text === marker);
 
-for (const busy of [false, true]) test(`native Pi: principal sessions discover/send/reply/commit once (${busy ? "busy tool boundary" : "idle wakeup"})`, { skip: !cli || process.platform === "win32", timeout: 60_000 }, async () => {
+for (const busy of [false, true]) test(`native Pi: principal sessions discover/send/reply/commit once (${busy ? "busy tool boundary" : "idle wakeup"})`, { skip: !cli || !nativeAvailable, timeout: 60_000 }, async () => {
   const scratch = mkdtempSync(join(tmpdir(), "stela-peer-pi-")), profile = join(scratch, "agent"); mkdirSync(profile, { mode: 0o700 });
   const a = client(profile, scratch, "sender"), b = client(profile, scratch, "receiver");
   try {
@@ -111,11 +113,11 @@ for (const busy of [false, true]) test(`native Pi: principal sessions discover/s
   } finally {
     await Promise.allSettled([a.close(), b.close()]).then((results) => {
       const rejected = results.find((item) => item.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
-    }).finally(() => { rmSync(dirname(endpointName(profile, newId())), { recursive: true, force: true }); rmSync(scratch, { recursive: true, force: true }); });
+    }).finally(() => { if (process.platform !== "win32") rmSync(dirname(endpointName(profile, newId())), { recursive: true, force: true }); rmSync(scratch, { recursive: true, force: true }); });
   }
 });
 
-for (const action of ["write", "write-denied", "delegate"]) test(`native Pi: a peer task uses receiver tools while retaining controls (${action})`, { skip: !cli || process.platform === "win32", timeout: 60_000 }, async () => {
+for (const action of ["write", "write-denied", "delegate"]) test(`native Pi: a peer task uses receiver tools while retaining controls (${action})`, { skip: !cli || !nativeAvailable, timeout: 60_000 }, async () => {
   const scratch = mkdtempSync(join(tmpdir(), "stela-peer-work-")), profile = join(scratch, "agent"); mkdirSync(profile, { mode: 0o700 });
   if (action === "delegate") writeFileSync(join(scratch, "peer-source.txt"), "DELEGATED_PEER_SOURCE\n");
   const a = client(profile, scratch, "sender", false, action), b = client(profile, scratch, "receiver", false, action);
@@ -155,11 +157,11 @@ for (const action of ["write", "write-denied", "delegate"]) test(`native Pi: a p
   } finally {
     await Promise.allSettled([a.close(), b.close()]).then((results) => {
       const rejected = results.find((item) => item.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
-    }).finally(() => { rmSync(dirname(endpointName(profile, newId())), { recursive: true, force: true }); rmSync(scratch, { recursive: true, force: true }); });
+    }).finally(() => { if (process.platform !== "win32") rmSync(dirname(endpointName(profile, newId())), { recursive: true, force: true }); rmSync(scratch, { recursive: true, force: true }); });
   }
 });
 
-test("native Pi: inherited extension in a helper never registers presence or session tools", { skip: !cli || process.platform === "win32", timeout: 35_000 }, async () => {
+test("native Pi: inherited extension in a helper never registers presence or session tools", { skip: !cli, timeout: 35_000 }, async () => {
   const scratch = mkdtempSync(join(tmpdir(), "stela-peer-child-")), profile = join(scratch, "agent"); mkdirSync(profile, { mode: 0o700 });
   const instance = client(profile, scratch, "sender", true);
   try {

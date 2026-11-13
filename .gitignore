@@ -1,2 +1,3 @@
 # Local Windows helper build artifacts; source and Cargo.lock stay versioned.
 /native/windows-job/target/
+/native/windows-sessions/target/

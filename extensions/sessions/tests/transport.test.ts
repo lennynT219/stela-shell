@@ -7,6 +7,7 @@ import { createConnection, createServer } from "node:net";
 import { once } from "node:events";
 import { createCipheriv, createHmac, randomBytes } from "node:crypto";
 import { Mailbox, newId } from "../messages.ts";
+import { WindowsTransport } from "../transport-windows.ts";
 import { endpointName, IO_DEADLINE_MS, MAX_FRAME_BYTES, PeerTransport } from "../transport.ts";
 
 const posix = { skip: process.platform === "win32", timeout: 15_000 };
@@ -131,14 +132,15 @@ test("invalid sender proof or ciphertext tag cannot enqueue even a well-framed r
   }
 });
 
-test("Windows endpoint derivation is local/profile-specific, not a native-security check", () => {
+test("Windows endpoint derivation refuses an unvalidated string profile", () => {
   const id = newId();
-  assert.match(endpointName("C:\\profile", id, "win32"), /^\\\\\.\\pipe\\stela-[a-f0-9]{32}-[a-f0-9]{32}$/);
-  assert.notEqual(endpointName("C:\\profile", id, "win32"), endpointName("C:\\other", id, "win32"));
+  assert.throws(() => endpointName("C:\\profile", id, "win32"), /validated native profile identity/);
+  assert.throws(() => endpointName("C:\\other", id, "win32"), /validated native profile identity/);
 });
 
-test("strict Windows transport remains unavailable before creating messaging state", { skip: process.platform !== "win32" }, async (t) => {
-  const { profile } = workspace(t);
-  await assert.rejects(PeerTransport.open(profile, { name: "a", sessionId: "a", cwd: "/" }, () => "accepted"), /unavailable on Windows/);
+test("Windows native startup fails closed for an unlaunchable controller before creating state", { skip: process.platform !== "win32" }, async (t) => {
+  const { scratch, profile } = workspace(t);
+  const invalid = join(scratch, "invalid.exe"); writeFileSync(invalid, "not a native executable");
+  await assert.rejects(WindowsTransport.open(profile, { name: "a", sessionId: "a", cwd: "/" }, () => "accepted", undefined, invalid), /Could not start native session bridge/);
   assert.equal(existsSync(join(profile, "stela-sessions")), false);
 });
