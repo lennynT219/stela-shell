@@ -1,6 +1,8 @@
 # Stela Web
 
-A separate, Stela-owned Pi package for web search and ordinary page reading, based on selected, attributed parts of `pi-web-access` rather than a new search engine or an unrelated client implementation.
+**Superseded scaffold, not the current target.** The user chose a single internal extension distributed with StelaShell, not a separately installed/versioned package. This directory remains unchanged in structure from checkpoint 486e166 and has no runtime. Proposed implementation/dependencies belong in extensions/web and StelaShell's root manifest; no migration or installation is performed by documenting this decision.
+
+The following notes preserve the inspected source basis and extraction proposal; consult the [current extension proposal](../../docs/WEB_DOCUMENTATION_PLAN.md) for architecture and approval scope.
 
 ## Status
 
