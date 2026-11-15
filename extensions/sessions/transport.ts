@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
-import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
+import { envelope, identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
 import { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS, MAX_CONNECTIONS, MAX_OUTBOUND,
   answer, boundedString, encode, presence, publicPeer, receipt, seal, type Payload, type Presence, type Receipt, type SessionTransport } from "./protocol.ts";
 export { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS } from "./protocol.ts";

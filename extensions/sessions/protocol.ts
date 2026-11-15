@@ -14,7 +14,6 @@ interface Packet { version: 1; id: string; from: string; to: string; nonce: stri
 export interface Receipt { accepted: boolean; duplicate?: boolean; error?: string }
 export type Payload = { kind: "ping" } | { kind: "message"; message: Envelope };
 
-const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
 const sign = (key: string, value: unknown) => createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify(value)).digest("hex");
 export function matches(actual: unknown, expected: string): boolean {
   return typeof actual === "string" && HEX64.test(actual) && timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
