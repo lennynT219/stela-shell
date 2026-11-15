@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
-import { formatMessage, Mailbox, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, type PeerInfo, type Received } from "./messages.ts";
+import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, SessionError, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
 import type { OpenTransport, SessionTransport } from "./protocol.ts";
 
@@ -46,7 +46,8 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   };
   const draft = (received: Received) => ({
     customType: MESSAGE_TYPE, content: formatMessage(received), display: true,
-    details: { activation: transport!.info.id, messageId: received.message.id, from: received.from.id, thread: received.message.thread, hop: received.message.hop, replyTo: received.message.replyTo },
+    details: { activation: transport!.info.id, messageId: received.message.id, from: received.from.id, thread: received.message.thread, hop: received.message.hop, replyTo: received.message.replyTo,
+      ...(received.message.work ? { work: received.message.work } : {}) },
   });
   const pump = (version = generation) => {
     if (version !== generation || !transport || !owner || !owns(owner) || paused || inFlight || !owner.isIdle()) return;
@@ -156,30 +157,43 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   pi.registerTool({
     name: "ss_sessions_send", label: "Enviar mensaje", exposure: "model-only",
     renderCall: callRenderer("ss_sessions_send", "Enviar mensaje", dependencies.text),
-    description: "Assign work, send context or reply to a PRIMARY session's exact local activation ID (up to 8 KiB UTF-8). Concrete requests are actionable delegated tasks using the receiver's own tools/permissions, not permission overrides. Returns accepted-for-delivery, NOT read/completed. Replies arrive automatically; no approval dialog, blocking ask or automatic retry.",
+    description: "Assign work, send context or reply to a PRIMARY session's exact local activation ID (up to 8 KiB UTF-8). Optional work at a fresh human-originated root selects a fixed 30-minute communication window (600–3600 seconds); ordinary conversations remain 10 minutes. Concrete requests use the receiver's own permissions, not permission overrides. Returns accepted-for-delivery, NOT read/completed. Replies arrive automatically; no approval dialog, blocking ask or automatic retry.",
     promptSnippet: "Assign bounded work, send context or reply to a primary stela-shell session",
     promptGuidelines: [
       `For ss_sessions_send collaboration: ${PEER_TASK_POLICY}`,
       `When handling ss_sessions_send work: ${PEER_TASK_BOUNDARIES}`,
       "Use ss_sessions_send for useful coordination and concrete delegated tasks. Do not copy secrets or whole conversations or transfer tool permissions.",
       "Use ss_sessions_send with exact activation IDs from ss_sessions_list or an incoming peer message. For a reply, supply its message ID as reply_to. Delivery/response may start model turns automatically. A receipt only means accepted into memory, not read, verified or completed work.",
+      "For ss_sessions_send, select work:{} (30 minutes) or work:{timeout_seconds:600..3600} only at a fresh human-originated root when a longer bounded communication window is useful. Replies inherit work automatically: omit work. Each message still expires within 10 minutes. No renewal, automatic upgrade/downgrade, expired-thread migration, task-runtime/cost guarantee or budget reset. Unsupported peers receive no assignment text and there is no fallback.",
       "After ss_sessions_send, continue independent work. If a reply is needed and nothing else remains, state it is pending; do not poll, sleep, repeatedly ask, or resend because an ACK/reply is missing. No automatic unavailable/acknowledgment replies or echo loops. Stop when the exchange is complete or a budget is reached.",
     ],
     parameters: { type: "object", additionalProperties: false, required: ["to", "text"], properties: {
       to: { type: "string", pattern: "^[a-f0-9]{32}$", description: "Exact live activation ID; not a name or Pi session ID." },
       text: { type: "string", minLength: 1, maxLength: 8192 }, reply_to: { type: "string", pattern: "^[a-f0-9]{32}$" },
+      work: { type: "object", additionalProperties: false, description: "Opt in only at a new human-originated root; fixed, non-renewable communication window. Omit on replies.", properties: {
+        timeout_seconds: { type: "integer", minimum: MIN_WORK_SECONDS, maximum: MAX_WORK_SECONDS, description: `Work window in seconds; default ${DEFAULT_WORK_SECONDS}. Queueing/processing counts.` },
+      } },
     } } as never,
     async execute(_id, params, signal, _update, ctx) {
       signal?.throwIfAborted();
       const current = requireTransport(ctx), version = generation;
       if (paused) throw new Error("Messaging is paused after interruption/injection failure; human input or /ss-sessions on is required.");
-      const { to, text, reply_to } = params as { to: string; text: string; reply_to?: string };
+      const { to, text, reply_to, work } = params as { to: string; text: string; reply_to?: string; work?: WorkOptions };
       if (to === current.info.id) throw new Error("Cannot message this activation itself.");
-      const message = mailbox.prepare(to, text, reply_to);
-      const receipt = await current.send(to, message, signal);
-      if (version !== generation || transport !== current || !owns(ctx)) throw new Error("Session changed; message delivery is unconfirmed. Do not retry automatically.");
-      if (!receipt.accepted) throw new Error(receipt.error ?? "Recipient rejected the message.");
-      return result(`Accepted for delivery: ${message.id} to ${to}. Not a read/completion receipt. Replies arrive automatically; continue independent work or honestly report a pending reply.`, { messageId: message.id, to, thread: message.thread, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false });
+      try {
+        const message = mailbox.prepare(to, text, reply_to, work);
+        const receipt = await current.send(to, message, signal);
+        if (version !== generation || transport !== current || !owns(ctx)) throw new SessionError("DELIVERY_UNCONFIRMED", "Session changed; message delivery is unconfirmed. Do not retry automatically.");
+        if (!receipt.accepted) {
+          if (receipt.code) throw new SessionError(receipt.code, receipt.error ?? "Recipient rejected the message.");
+          throw new Error(receipt.error ?? "Recipient rejected the message.");
+        }
+        return result(`Accepted for delivery: ${message.id} to ${to}. Not a read/completion receipt. Replies arrive automatically; continue independent work or honestly report a pending reply.`,
+          { messageId: message.id, to, thread: message.thread, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false, ...(message.work ? { work: message.work } : {}) });
+      } catch (error) {
+        if (!(error instanceof SessionError)) throw error;
+        return { ...result(error.message, { code: error.code, status: "error" }), isError: true };
+      }
     },
   });
   pi.registerCommand("ss-sessions", {

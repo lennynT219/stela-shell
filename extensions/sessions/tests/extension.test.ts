@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import sessions, { MESSAGE_TYPE, registerSessions } from "../index.ts";
-import { newId, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY } from "../messages.ts";
+import { Mailbox, newId, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, SessionError } from "../messages.ts";
 
 function harness(env: NodeJS.ProcessEnv = {}, opening?: Promise<void>) {
   const hooks = new Map<string, Function[]>(), tools = new Map<string, any>(), commands = new Map<string, any>();
@@ -21,7 +21,7 @@ function harness(env: NodeJS.ProcessEnv = {}, opening?: Promise<void>) {
   };
   registerSessions(pi, { profile: "/unused-model-free-profile", env, open: (async (_profile: string, info: any, receive: Function) => {
     const transport = { info: { ...info, id: newId() }, receive, closed: false, async close() { this.closed = true; },
-      async list() { return []; }, async send() { return { accepted: true }; }, update() {} };
+      outgoing: [] as any[], async list() { return []; }, async send(to: string, message: any) { this.outgoing.push({ to, message }); return { accepted: true }; }, update() {} };
     transports.push(transport); await opening; return transport;
   }) as any });
   return { pi, ctx, hooks, tools, commands, sent, widgets, transports, flags, branch,
@@ -160,6 +160,62 @@ test("metadata hooks await the transport and late completion cannot reactivate a
   assert.equal(h.transports[0].closed, true); assert.equal(h.transports.length, 1);
   await assert.rejects(h.tools.get("ss_sessions_list").execute("list", {}, undefined, undefined, h.ctx), /unavailable/);
 });
+test("work schema and tool errors require owned human input; first admission reserves the fixed root", async () => {
+  const h = harness(); await h.emit("session_start");
+  const tool = h.tools.get("ss_sessions_send"), to = newId();
+  assert.equal(tool.parameters.additionalProperties, false); assert.equal(tool.parameters.properties.work.additionalProperties, false);
+  assert.equal(tool.parameters.properties.work.properties.timeout_seconds.minimum, 600);
+  assert.equal(tool.parameters.properties.work.properties.timeout_seconds.maximum, 3600);
+  assert.match(tool.promptGuidelines.join(" "), /No renewal/);
+  await h.emit("input", { source: "extension" });
+  const denied = await tool.execute("nonhuman", { to, text: "Root", work: {} }, undefined, undefined, h.ctx);
+  assert.equal(denied.isError, true); assert.equal(denied.details.code, "INVALID_WORK_CONTEXT");
+  assert.equal(h.transports[0].outgoing.length, 0);
+  await h.emit("input", { source: "interactive" });
+  let finish!: () => void;
+  h.transports[0].send = async (_to: string, message: any) => { h.transports[0].outgoing.push({ message }); await new Promise<void>((resolve) => { finish = resolve; }); return { accepted: true }; };
+  const first = tool.execute("first", { to, text: "Root", work: {} }, undefined, undefined, h.ctx);
+  const concurrent = await tool.execute("second", { to, text: "Cannot renew", work: {} }, undefined, undefined, h.ctx);
+  assert.equal(concurrent.isError, true); assert.equal(concurrent.details.code, "INVALID_WORK_CONTEXT"); assert.equal(h.transports[0].outgoing.length, 1);
+  finish(); const admitted = await first;
+  assert.equal(admitted.details.work.deadline - admitted.details.work.startedAt, 1_800_000);
+  assert.equal(admitted.details.work.id, h.transports[0].outgoing[0].message.work.id);
+});
+
+test("work context reaches committed custom entries and survives interruption without extension-input reset", async () => {
+  const h = harness(); await h.emit("session_start"); h.setIdle(false);
+  const from = sender(), source = new Mailbox(); source.humanInput();
+  const value = source.prepare(h.transports[0].info.id, "Bounded work", undefined, {});
+  h.transports[0].receive(from, value);
+  const proposal = await h.emit("turn_end", { outcome: "completed", entries: [] });
+  assert.deepEqual(proposal.entries[0].details.work, value.work); assert.match(proposal.entries[0].content, /fixed deadline/);
+  h.branch.push(proposal.entries[0]); await h.emit("context");
+  const tool = h.tools.get("ss_sessions_send"), args = { to: from.id, text: "Result", reply_to: value.id };
+  await h.emit("agent_settled", { aborted: true });
+  await assert.rejects(tool.execute("paused", args, undefined, undefined, h.ctx), /paused/);
+  await h.emit("input", { source: "extension" });
+  await assert.rejects(tool.execute("still-paused", args, undefined, undefined, h.ctx), /paused/);
+  await h.emit("input", { source: "rpc" });
+  const reply = await tool.execute("reply", args, undefined, undefined, h.ctx);
+  assert.deepEqual(reply.details.work, value.work); assert.equal(reply.details.thread, value.thread);
+  const old = h.transports[0]; await h.emit("session_tree");
+  assert.throws(() => old.receive(from, value), /no longer receiving/);
+  const missing = await tool.execute("old-anchor", args, undefined, undefined, h.ctx);
+  assert.equal(missing.details.code, "REPLY_TARGET_NOT_RETAINED"); assert.equal(h.transports[1].outgoing.length, 0);
+});
+
+test("unsupported work errors expose a safe reason and do not renew or silently fall back", async () => {
+  const h = harness(); await h.emit("session_start"); await h.emit("input", { source: "interactive" });
+  let sends = 0;
+  h.transports[0].send = async () => { sends++; throw new SessionError("UNSUPPORTED_WORK_CONTEXT", "No assignment text sent; no fallback."); };
+  const tool = h.tools.get("ss_sessions_send"), args = { to: newId(), text: "Work", work: {} };
+  const rejected = await tool.execute("unsupported", args, undefined, undefined, h.ctx);
+  assert.equal(rejected.isError, true); assert.equal(rejected.details.code, "UNSUPPORTED_WORK_CONTEXT");
+  const repeat = await tool.execute("not-renewed", args, undefined, undefined, h.ctx);
+  assert.equal(repeat.details.code, "INVALID_WORK_CONTEXT"); assert.equal(sends, 1);
+  await h.emit("session_shutdown");
+});
+
 test("package retains session coverage and integrates only the approved owned web extension/dependencies", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
   assert.deepEqual(manifest.pi.extensions, [

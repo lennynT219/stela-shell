@@ -3,8 +3,8 @@ import { randomBytes } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { envelope, identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
-import { answer, boundedString, decode, encode, MAX_PEERS, IO_DEADLINE_MS, presence, publicPeer, receipt, seal,
+import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
+import { answer, boundedString, decode, encode, MAX_PEERS, IO_DEADLINE_MS, presence, publicPeer, receipt, seal, sendBounded,
   type Payload, type Presence, type Receive, type Receipt, type SessionTransport } from "./protocol.ts";
 
 export const WINDOWS_SESSIONS_HELPER = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../../native/windows-sessions/target/release/stela-sessions.exe");
@@ -154,9 +154,9 @@ export class WindowsTransport implements SessionTransport {
     try { await transport.update(info.name, signal); signal?.throwIfAborted(); return transport; }
     catch (error) { await transport.close(); throw error; }
   }
-  private async readPresence(id: string): Promise<Presence> {
+  private async readPresence(id: string, signal?: AbortSignal): Promise<Presence> {
     if (this.closed) throw new Error("Session transport closed.");
-    const values = await this.bridge.call(3, [Buffer.from(identifier(id))]);
+    const values = await this.bridge.call(3, [Buffer.from(identifier(id))], signal);
     if (values.length !== 1) throw new Error("Invalid native presence result.");
     return presence(JSON.parse(utf8.decode(values[0])), id);
   }
@@ -171,11 +171,14 @@ export class WindowsTransport implements SessionTransport {
     const request = seal(this.own, peer, payload);
     const result = await this.bridge.call(5, [Buffer.from(peer.id),integer(peer.pid),encode(request)],signal,IO_DEADLINE_MS);
     if (result.length !== 1) throw new Error("Invalid native wire result.");
-    return receipt(decode(result[0]), request, this.own.id, peer);
+    return receipt(decode(result[0]), request, this.own.id, peer, payload.kind === "work_support" || payload.kind === "work_message" ? payload.kind : undefined);
   }
   async send(to: string, message: Envelope, signal?: AbortSignal): Promise<Receipt> {
     if (to === this.own.id) throw new Error("Cannot message this activation itself.");
-    return this.request(await this.readPresence(identifier(to)), { kind: "message", message: envelope(message) }, signal);
+    return sendBounded(message, signal, async (scoped) => {
+      const peer = await this.readPresence(identifier(to), scoped);
+      return (payload) => this.request(peer, payload, scoped);
+    });
   }
   async list(signal?: AbortSignal): Promise<PeerInfo[]> {
     signal?.throwIfAborted(); if (this.closed) throw new Error("Session transport closed.");

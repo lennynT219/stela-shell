@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 import { createConnection, createServer } from "node:net";
 import { once } from "node:events";
 import { createCipheriv, createHmac, randomBytes } from "node:crypto";
-import { Mailbox, newId } from "../messages.ts";
+import { Mailbox, newId, SessionError } from "../messages.ts";
+import { unseal } from "../protocol.ts";
 import { WindowsTransport } from "../transport-windows.ts";
 import { endpointName, IO_DEADLINE_MS, MAX_FRAME_BYTES, PeerTransport } from "../transport.ts";
 
@@ -130,6 +131,43 @@ test("invalid sender proof or ciphertext tag cannot enqueue even a well-framed r
     const closed = once(socket, "close"); await once(socket, "connect"); socket.write(JSON.stringify({ ...fields, proof }) + "\n"); await closed;
     assert.equal(b.box.pending, 0);
   }
+});
+
+test("POSIX work negotiation delivers escaped payloads and a fresh result after ordinary TTL", posix, async (t) => {
+  let now = Date.now(); t.mock.method(Date, "now", () => now);
+  const { profile } = workspace(t), a = await node(t, profile, "work-a"), b = await node(t, profile, "work-b");
+  a.box.humanInput();
+  const root = a.box.prepare(b.transport.info.id, "\u0000".repeat(8191) + "x", undefined, {});
+  assert.deepEqual(await a.transport.send(b.transport.info.id, root), { accepted: true, duplicate: false });
+  assert.deepEqual(await a.transport.send(b.transport.info.id, root), { accepted: true, duplicate: true });
+  assert.equal(b.box.next()?.message.text, root.text); b.box.delivered(root.id);
+  now += 660_000;
+  const reply = b.box.prepare(a.transport.info.id, "Late but fresh work result", root.id);
+  assert.equal(reply.work?.deadline, root.work?.deadline); assert.ok(reply.expiresAt > root.expiresAt);
+  assert.equal((await b.transport.send(a.transport.info.id, reply)).accepted, true);
+  assert.deepEqual(a.box.next()?.message.work, root.work);
+});
+
+test("a legacy-only POSIX peer receives no assignment text, fallback or automatic retry", posix, async (t) => {
+  const { profile } = workspace(t), a = await node(t, profile, "work-a"), b = await node(t, profile, "legacy");
+  const path = join(profile, "stela-sessions", `${b.transport.info.id}.json`), own = JSON.parse(readFileSync(path, "utf8"));
+  await b.transport.close(); writeFileSync(path, JSON.stringify(own), { mode: 0o600 });
+  const received: unknown[] = [];
+  const legacy = createServer((socket) => {
+    socket.once("data", (bytes) => {
+      received.push(unseal(JSON.parse(bytes.toString()), own));
+      socket.end(); // Existing strict v1 readers reject this unknown control kind without an ACK.
+    });
+  });
+  const endpoint = endpointName(a.transport.profile, b.transport.info.id);
+  await new Promise<void>((resolve) => legacy.listen(endpoint, resolve)); chmodSync(endpoint, 0o600);
+  t.after(() => new Promise<void>((resolve) => legacy.close(() => resolve())));
+  a.box.humanInput();
+  await assert.rejects(a.transport.send(b.transport.info.id, a.box.prepare(b.transport.info.id, "SECRET_WORK_ASSIGNMENT", undefined, {})),
+    (error: unknown) => error instanceof SessionError && error.code === "UNSUPPORTED_WORK_CONTEXT");
+  assert.deepEqual(received, [{ kind: "work_support", version: 1 }]);
+  assert.doesNotMatch(JSON.stringify(received), /SECRET_WORK_ASSIGNMENT/);
+  assert.equal(b.box.pending, 0);
 });
 
 test("Windows endpoint derivation refuses an unvalidated string profile", () => {

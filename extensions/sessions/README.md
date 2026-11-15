@@ -7,7 +7,7 @@ Canonical tools use the `ss` namespace and short titles **Sesiones** / **Enviar 
 ## Operation
 
 - `ss_sessions_list {}` discovers authenticated, currently reachable activations. An activation ID is independent of Pi's session ID: two processes opening the same saved session have distinct addresses. Display names/workspace metadata are descriptive, not routing identities. Discovery text is under 16 KiB, with explicitly truncated metadata and complete activation IDs.
-- `ss_sessions_send { to, text, reply_to? }` sends a message to an **exact activation ID**. Use the inbound message ID as `reply_to` to correlate an answer. This tool is model-only; it is not callable from codemode.
+- `ss_sessions_send { to, text, reply_to?, work? }` sends a message to an **exact activation ID**. Use the inbound message ID as `reply_to` to correlate an answer. This tool is model-only; it is not callable from codemode.
 - Accepted incoming messages become visible `stela-peer-message` custom context. An idle session can start a model turn automatically; a busy session admits the message to its bounded inbox and injects it only at a completed turn/tool-batch boundary (or the final pre-settlement boundary). Running tools are never aborted by delivery.
 - There is **no approval dialog per peer or message**, as selected by the user. The user's collaboration policy also makes concrete primary-session requests **actionable delegated tasks**, not merely information: the receiver may use its own tools for file edits, commands and useful bounded `ss_tasks_delegate` assignments without requiring a new human prompt solely because the request came from a peer. Automatic work/replies can consume the receiving session's model tokens.
 - Task delegation is **not permission delegation**. Peer text retains its provenance, cannot override direct user restrictions or denials in either session, and cannot supply the human approval required for dependency installation, destructive/admin actions or publication. The receiver keeps its own permissions, resource scope and task priorities. The extension does not change the active tool set or replace the system prompt.
@@ -20,6 +20,26 @@ ss_sessions_list {}
 ss_sessions_send {"to":"<32-character activation ID>","text":"Which validation cases affect our current task?"}
 ss_sessions_send {"to":"<sender activation ID>","reply_to":"<inbound message ID>","text":"The relevant cases are ..."}
 ```
+
+### Opt-in fixed work window
+
+For a longer collaboration, choose `work: {}` at the **first send of a fresh human-originated workflow**. The default is 30 minutes; `work: { timeout_seconds: 600..3600 }` selects an integer 10–60-minute window. Without `work`, ordinary ten-minute conversation behavior is unchanged.
+
+```text
+ss_sessions_send {"to":"<exact activation ID>","text":"Review these scoped sources and return your findings.","work":{}}
+# The receiver replies normally; omit work on every continuation:
+ss_sessions_send {"to":"<sender activation ID>","reply_to":"<inbound message ID>","text":"Observed findings ..."}
+```
+
+The host fixes a random work ID, admission time and deadline **once**, before asynchronous I/O. Queueing, processing and negotiation consume that window. Each new message expires within ten minutes of creation and no later than the fixed work deadline. A fresh result after minute ten can therefore correlate to an earlier work message without renewing the deadline. At the exact deadline, automatic work sends fail closed. This is a communication window, **not a job-runtime, cancellation, token or cost guarantee**.
+
+Only owned interactive/RPC input opens root eligibility; startup, peer/custom/extension input and command handling do not impersonate it. An ordinary send consumes that eligibility; ordinary automatic lineage cannot upgrade to work. Repeating `work` cannot renew a root, and omitting `work`/`reply_to` cannot downgrade or reset it. Older anchors cannot lower the retained causal hop. A committed unrelated/older entry does not replace an active work boundary (including its expired marker); explicit cross-context replies fail closed until genuine input chooses a fresh workflow. This prevents queue order from laundering a deadline, rather than silently switching active work.
+
+Work correlation/deduplication uses the **same 64-entry history**, retained until the work deadline rather than each message's delivery expiry. No live IDs are evicted, and no second unbounded context map exists. An expired queued body is removed from the inbox and is never newly injected. Retaining an anchor does not authorize redelivery of its expired message. A failed attempt/negotiation still consumes admission and does not release the fixed root for automatic renewal.
+
+Before transmitting **any assignment text**, each work send makes one text-free, authenticated support query to the exact activation. It requires a strict request/activation-bound positive work-version response, then uses a distinct versioned work payload/receipt. Ordinary v1 payloads/pings/receipts, presence v1, encrypted packet framing and the native bridge API remain unchanged. Unsupported/unknown/unconfirmed support fails closed: no task body, metadata stripping, ordinary fallback, capability cache or automatic retry. Negotiation, presence lookup and sending share one absolute two-second operation/cancellation budget, not two consecutive allowances. Both peers need compatible extensions; activating them remains an operator-controlled step.
+
+Known local guards return `isError` with a safe `details.code`, including `CONVERSATION_EXPIRED`, `WORK_EXPIRED`, `REPLY_TARGET_NOT_RETAINED`, `MESSAGE_EXPIRED`, `INVALID_LIFETIME`, `HOP_LIMIT`, `SEND_BUDGET`, `RECEIVE_BUDGET`, `STATE_FULL`, `INVALID_WORK_CONTEXT`, `CONTEXT_MISMATCH`, `MESSAGE_CONFLICT`, `UNSUPPORTED_WORK_CONTEXT` and `DELIVERY_UNCONFIRMED`. Work-mode recipient rejections can carry an authenticated allowlisted code; ordinary v1 recipient errors remain generic. Missing correlation does not prove expiry. No error authorizes resending, relaying an expired task, simulating human input or restarting an activation to evade a guard.
 
 ### Acting on a peer task
 
@@ -48,13 +68,14 @@ Human-only controls:
 | --- | --- |
 | Message text | 8 KiB UTF-8, never silently truncated |
 | Pending inbox | 8 messages |
-| Retained incoming/outgoing IDs | 64 unexpired entries; no eviction of live deduplication IDs |
+| Retained incoming/outgoing IDs | 64 entries, until ordinary expiry or fixed work deadline; no eviction of live IDs |
 | Automatic receives / send attempts | 16 each between genuine interactive/RPC inputs |
-| Conversation | 8 hops, at most 10 minutes from its root |
+| Ordinary conversation | 8 hops, at most 10 minutes from its root |
+| Explicit work context | Same 8-hop/activation budgets; fixed default 30 minutes, allowed 10–60; each message ≤10 minutes |
 | Transport frame | 128 KiB including worst-case JSON escaping and encrypted hex payload |
 | Presence record / enumeration | 4 KiB per record, 128 directory entries, 32 candidate peers |
 | Connections | 8 inbound and 4 outbound per activation |
-| Read/connect/ACK operation | Absolute 2-second deadline, including idle clients |
+| Read/connect/ACK operation | Absolute 2-second deadline, including idle clients; a work send shares one budget across negotiation + send |
 
 Automatic sends inherit current peer lineage even without `reply_to`. An explicit reply cannot lower the active hop or extend its expiry. A model cannot create an endless conversation simply by omitting correlation fields. These are message/activation limits, **not a cap on all model turns, tokens or money spent by Pi**. The host's own model recovery and unrelated tools remain outside this messaging protocol.
 
@@ -87,6 +108,10 @@ Missing, unlaunchable or incompatible artifacts fail closed. Runtime never downl
 
 Native Windows IPC, negative protection cases and two-Pi deterministic integration have been exercised. The independent native-boundary review exhausted its 240-second budget without an answer and is **incomplete**, not a certification or a running review. No retry was launched. Cross-account penetration, remote SMB attacks and broad OS-version/TUI/provider coverage are not established by these checks.
 
+### Work-mode verification limits
+
+The work extension is TypeScript-only, with isolated mailbox/crypto/codec, POSIX IPC and deterministic Pi fixtures. The fixtures advance clocks only inside their temporary processes; no live activation was reloaded or reset. Shared framing checks cover a maximally escaped work body through the unchanged Windows bridge encoder, **not execution of the native Windows adapter/binary**. Fresh Windows/macOS work-mode execution and interactive/real-provider behavior remain unverified. The new independent work-guard review exhausted its 240-second budget without an answer and is incomplete; no retry was launched. See `docs/WORK_STATE.md` for observed results.
+
 ### POSIX/macOS verification status
 
 Fresh Linux session checks exposed and then verified the repair of a missing POSIX `envelope` import. The focused transport/extension/Pi cases now pass; Windows adapter/native source and wire behavior are unchanged by this repair. Native Windows was not rerun on Linux, and its retained evidence is not a new execution result. Native macOS path/permission behavior remains unverified. See `docs/WORK_STATE.md` for current counts and scope.
@@ -118,7 +143,7 @@ npm test
 SS_TEST_PI_CLI=/absolute/path/to/pi-coding-agent/dist/bundle/cli.js npm test
 ```
 
-Tests cover message bounds/lineage/budgets, local discovery/send/reply, capability confidentiality/authentication, malformed/unsafe/stale state, backpressure/deadlines, registration/lifecycle/commit behavior, and opt-in real Pi RPC sessions. Native Pi cases exercise idle wakeup, delivery after a blocked tool completes, once-only context commitment and inherited helper exclusion. Peer-task cases verify model-facing policy integration, a real built-in file write, a receiver-side permission hook that still blocks a write, and actual bounded read-only delegation with returned file evidence and no helper peer activation. The receiver acts without a fresh or impersonated human prompt. Fixtures are scripted and have no network model backend; profiles/processes are temporary and cleaned up. These mechanism/instruction checks do not establish a real model's willingness to follow the policy, terminal presentation or performance benefits. Current results and review limitations are in `docs/WORK_STATE.md`.
+Tests cover ordinary and fixed-work bounds/lineage/budgets, exact expiry, long-work fresh-message correlation, immutable metadata/anti-downgrade, bounded retained IDs, expired queues, authenticated support/strict version separation, unsupported-peer no-text behavior, shared deadlines/cancellation, local discovery/send/reply, capability confidentiality/authentication, malformed/unsafe/stale state, backpressure/deadlines, registration/lifecycle/commit behavior, and opt-in real Pi RPC sessions. Native Pi cases exercise idle wakeup, delivery after a blocked tool completes, once-only context commitment and inherited helper exclusion. Peer-task cases verify model-facing policy integration, a real built-in file write, a receiver-side permission hook that still blocks a write, and actual bounded read-only delegation with returned file evidence and no helper peer activation. The receiver acts without a fresh or impersonated human prompt. Fixtures are scripted and have no network model backend; profiles/processes are temporary and cleaned up. These mechanism/instruction checks do not establish a real model's willingness to follow the policy, terminal presentation or performance benefits. Current results and review limitations are in `docs/WORK_STATE.md`.
 
 ## Design references
 

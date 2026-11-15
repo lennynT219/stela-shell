@@ -100,7 +100,8 @@ for (const busy of [false, true]) test(`native Pi: principal sessions discover/s
       assert.equal(entries.filter((entry: any) => entry.type === "message" && entry.message.role === "user").length, instance === a || busy ? 1 : 0, "peer delivery must not impersonate user input");
       assert.equal(instance.events.filter((event) => event.type === "tool_execution_end" && event.toolName === "ss_sessions_send" && !event.isError).length, 1);
       for (const record of records) assert.doesNotMatch(JSON.stringify(instance.events), new RegExp(record.secret), "capabilities must not reach Pi context/events");
-      assert.doesNotMatch(JSON.stringify(instance.events), /UNEXPECTED_FIXTURE|extension_ui_request.*(?:confirm|select)/);
+      assert.doesNotMatch(JSON.stringify(instance.events), /UNEXPECTED_FIXTURE/);
+      assert.deepEqual(instance.events.filter((event) => event.type === "extension_ui_request" && ["confirm", "select"].includes(event.method)), [], "inspect UI methods, not words in schema/guidance text");
     }
     if (busy) {
       const finished = b.events.findIndex((event) => event.type === "tool_execution_end" && event.toolName === "fixture_hold");
@@ -154,6 +155,56 @@ for (const action of ["write", "write-denied", "delegate"]) test(`native Pi: a p
     const events = [...a.events, ...b.events];
     assert.doesNotMatch(JSON.stringify(events), /UNEXPECTED_FIXTURE/);
     assert.deepEqual(events.filter((event) => event.type === "extension_ui_request" && ["confirm", "select"].includes(event.method)), [], "check actual UI methods, not words in model/tool descriptions");
+  } finally {
+    await Promise.allSettled([a.close(), b.close()]).then((results) => {
+      const rejected = results.find((item) => item.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
+    }).finally(() => { if (process.platform !== "win32") rmSync(dirname(endpointName(profile, newId())), { recursive: true, force: true }); rmSync(scratch, { recursive: true, force: true }); });
+  }
+});
+
+for (const action of ["work-long", "work-denied"]) test(`native Pi: opt-in work context retains deadlines and receiver controls (${action})`, { skip: !cli || !nativeAvailable, timeout: 60_000 }, async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "ss-work-pi-")), profile = join(scratch, "agent"); mkdirSync(profile, { mode: 0o700 });
+  const a = client(profile, scratch, "sender", false, action), b = client(profile, scratch, "receiver", false, action);
+  try {
+    const [, right] = await Promise.all([a.request("get_state"), b.request("get_state")]);
+    const records = readdirSync(join(profile, "stela-sessions")).map((file) => JSON.parse(readFileSync(join(profile, "stela-sessions", file), "utf8")));
+    const target = records.find((record) => record.sessionId === right.sessionId);
+    const integrated = a.waitFor(final("SENDER_INTEGRATED_REPLY")), replied = b.waitFor(final("RECEIVER_RESPONDED"));
+    const admission = a.waitFor((event) => event.type === "tool_execution_end" && event.toolName === "ss_sessions_send");
+    const holding = action === "work-long" ? b.waitFor((event) => event.type === "tool_execution_start" && event.toolName === "fixture_hold") : undefined;
+    await a.request("prompt", { message: `SEND:${target.id}` });
+    const root = await admission; assert.equal(root.isError, false);
+    assert.equal(root.result.details.work.deadline - root.result.details.work.startedAt, 1_800_000);
+    if (holding) {
+      await holding;
+      // Commands skip input hooks: advance both isolated clocks, not budgets or genuine-input state.
+      await a.request("prompt", { message: "/fixture-advance 660000" });
+      await b.request("prompt", { message: "/fixture-advance 660000" });
+      await b.request("prompt", { message: "/fixture-release" });
+    }
+    await Promise.all([integrated, replied]);
+    const reply = b.events.find((event) => event.type === "tool_execution_end" && event.toolName === "ss_sessions_send");
+    assert.equal(reply.isError, false); assert.deepEqual(reply.result.details.work, root.result.details.work);
+    const { entries } = await b.request("get_entries");
+    assert.equal(entries.filter((entry: any) => entry.type === "message" && entry.message.role === "user").length, 0);
+    const received = entries.filter((entry: any) => entry.type === "custom_message" && entry.customType === "stela-peer-message");
+    assert.equal(received.length, 1); assert.deepEqual(received[0].details.work, root.result.details.work);
+    assert.match(received[0].content, /fixed deadline/);
+    if (action === "work-long") {
+      const sendMessage = (instance: ReturnType<typeof client>) => instance.events.find((event) => event.type === "message_end" && event.message?.role === "assistant" &&
+        event.message.content.some((part: any) => part.type === "toolCall" && part.name === "ss_sessions_send")).message;
+      // Tool-start events carry no timestamp. Use the actual fixture-generated assistant messages.
+      const rootTime = sendMessage(a).timestamp, replyTime = sendMessage(b).timestamp;
+      assert.ok(Number.isSafeInteger(rootTime) && Number.isSafeInteger(replyTime));
+      assert.ok(replyTime - rootTime >= 600_000, "the actual fixture reply occurs after the ordinary window");
+    } else {
+      const denied = b.events.find((event) => event.type === "tool_execution_end" && event.toolName === "write");
+      assert.equal(denied.isError, true); assert.match(JSON.stringify(denied.result), /Fixture receiver denies writes/);
+      assert.equal(existsSync(join(scratch, "peer-action.txt")), false);
+      const { entries: senderEntries } = await a.request("get_entries");
+      assert.match(senderEntries.find((entry: any) => entry.customType === "stela-peer-message").content, /WORK_RESULT:WRITE_DENIED/);
+    }
+    assert.doesNotMatch(JSON.stringify([...a.events, ...b.events]), /UNEXPECTED_FIXTURE/);
   } finally {
     await Promise.allSettled([a.close(), b.close()]).then((results) => {
       const rejected = results.find((item) => item.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;

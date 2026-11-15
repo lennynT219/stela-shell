@@ -2,9 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
-import { envelope, identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
+import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
 import { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS, MAX_CONNECTIONS, MAX_OUTBOUND,
-  answer, boundedString, encode, presence, publicPeer, receipt, seal, type Payload, type Presence, type Receipt, type SessionTransport } from "./protocol.ts";
+  answer, boundedString, encode, presence, publicPeer, receipt, seal, sendBounded, type Payload, type Presence, type Receipt, type SessionTransport } from "./protocol.ts";
 export { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS } from "./protocol.ts";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
 /** Exactly one bounded JSON line. Absolute deadlines also cover clients that send no bytes. */
@@ -175,13 +175,16 @@ export class PeerTransport {
       socket.on("error", () => finish(new Error("Peer unavailable; delivery unconfirmed. Do not automatically retry.")));
       socket.once("close", () => finish(new Error("Peer disconnected; delivery unconfirmed. Do not automatically retry.")));
       readFrame(socket, (raw) => {
-        finish(undefined, receipt(raw, request, this.own.id, peer));
+        finish(undefined, receipt(raw, request, this.own.id, peer, payload.kind === "work_support" || payload.kind === "work_message" ? payload.kind : undefined));
       }, () => finish(new Error("Invalid peer acknowledgment; delivery unconfirmed. Do not automatically retry.")));
     });
   }
   async send(to: string, message: Envelope, signal?: AbortSignal): Promise<Receipt> {
     if (to === this.own.id) throw new Error("Cannot message this activation itself.");
-    return this.request(this.readPresence(identifier(to)), { kind: "message", message: envelope(message) }, signal);
+    return sendBounded(message, signal, async (scoped) => {
+      const peer = this.readPresence(identifier(to));
+      return (payload) => this.request(peer, payload, scoped);
+    });
   }
   async list(signal?: AbortSignal): Promise<PeerInfo[]> {
     if (this.closed) throw new Error("Session transport is closed.");
