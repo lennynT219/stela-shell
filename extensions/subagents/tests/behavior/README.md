@@ -1,6 +1,6 @@
 # Live delegation observation
 
-This is an opt-in behavioral experiment, not part of ordinary model-free `npm test` execution. The principal uses its real provider/model, existing Stela profile, production FARO and helper instructions. The deterministic integration provider cannot establish initiative because it requests delegation programmatically.
+This is an opt-in behavioral experiment, not part of ordinary model-free `npm test` execution. The principal uses its real provider/model, existing stela-shell profile, production FARO and helper instructions. The deterministic integration provider cannot establish initiative because it requests delegation programmatically.
 
 ## Scope and cases
 
@@ -61,6 +61,8 @@ The artifacts include:
 - `<case>/summary.json` and `answer.md`: admissions, bounded assignments, committed results, principal work before delivery, final answer, termination and mutation checks.
 - `summary.json`: completed cases and cases not attempted after a blocker.
 - `report.md`: the integrating agent's evidence-linked assessment, written after reviewing actual outputs.
+
+The analyzer recognizes both `ss_tasks_delegate` / `ss_tasks_cancel` and historical `stela_delegate` / `stela_cancel`. It preserves event identities and does not rewrite private artifacts. New preparation checks `--ss-tasks-concurrency` but retains the configured legacy profile-link paths; this naming migration does not authorize another live experiment.
 
 The automated summaries are observations, not a score. Manually assess:
 

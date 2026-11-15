@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveLaunch } from "../runner.ts";
 
-const cli = process.env.STELA_TEST_PI_CLI;
+const cli = process.env.SS_TEST_PI_CLI ?? process.env.STELA_TEST_PI_CLI;
 const extension = fileURLToPath(new URL("../index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/provider.ts", import.meta.url));
 const exec = promisify(execFile);
@@ -22,10 +22,13 @@ for (const action of ["read", "write", "permission-denied"]) {
     mkdirSync(profile, { recursive: true }); mkdirSync(cwd);
     writeFileSync(join(cwd, "source.txt"), "OBSERVED_FIXTURE_EVIDENCE\n");
     try {
+      const linked = join(scratch, "linked-tasks");
+      if (action === "read") symlinkSync(dirname(extension), linked, process.platform === "win32" ? "junction" : "dir");
+      const entry = action === "read" ? join(linked, "index.ts") : extension;
       const execution = exec(process.execPath, [cli!,
         "--offline", "--mode", "json", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-approve",
-        "--extension", provider, "--extension", extension,
-        "--model", "stela-fixture/deterministic", "--thinking", "off", "Resolve the fixture assignment",
+        "--extension", provider, "--extension", entry, "--ss-tasks-concurrency", "2",
+        "--model", "ss-fixture/deterministic", "--thinking", "off", "Resolve the fixture assignment",
       ], {
         cwd, timeout: 25_000, maxBuffer: 2 * 1024 * 1024,
         env: {
@@ -35,7 +38,7 @@ for (const action of ["read", "write", "permission-denied"]) {
             USERPROFILE: home, TEMP: scratch, TMP: scratch,
             APPDATA: join(home, "AppData", "Roaming"), LOCALAPPDATA: join(home, "AppData", "Local"),
           } : {}),
-          PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1", NO_UPDATE_NOTIFIER: "1", STELA_FIXTURE_ACTION: action,
+          PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1", NO_UPDATE_NOTIFIER: "1", SS_FIXTURE_ACTION: action,
         },
       });
       // Pi reads piped stdin before startup; close the test client's unused input.
@@ -43,7 +46,7 @@ for (const action of ["read", "write", "permission-denied"]) {
       const { stdout, stderr } = await execution;
       assert.doesNotMatch(stderr, /Failed to load extension|Extension error/);
       const events = stdout.trim().split("\n").map((line) => JSON.parse(line));
-      const receipt = events.find((event) => event.type === "tool_execution_end" && event.toolName === "stela_delegate");
+      const receipt = events.find((event) => event.type === "tool_execution_end" && event.toolName === "ss_tasks_delegate");
       assert.ok(receipt, stdout + stderr);
       assert.equal(receipt.isError, false, JSON.stringify(receipt));
       assert.equal(receipt.result.details.timeoutSeconds, action === "read" ? 300 : 120, "native admission must preserve the selected budget and normalize omission");
@@ -69,7 +72,7 @@ for (const action of ["read", "write", "permission-denied"]) {
 }
 
 test("native launch resolution preserves explicit policy resources and refuses unknown policy flags", { skip: !cli }, () => {
-  const launch = resolveLaunch([process.execPath, cli!, "--extension", provider, "--no-extensions", "--system-prompt", "policy text", "--model", "fixture/model", "--stela-subagent-concurrency", "5"], process.execPath);
+  const launch = resolveLaunch([process.execPath, cli!, "--extension", provider, "--no-extensions", "--system-prompt", "policy text", "--model", "fixture/model", "--ss-tasks-concurrency", "5"], process.execPath);
   assert.deepEqual(launch.resourceArgs, ["--extension", provider, "--no-extensions", "--system-prompt", "policy text"]);
   assert.throws(() => resolveLaunch([process.execPath, cli!, "--unknown-policy", "strict"], process.execPath), /Cannot safely inherit/);
   assert.throws(() => resolveLaunch([process.execPath, cli!, "--extension", "npm:unknown"], process.execPath), /remote package flags/);

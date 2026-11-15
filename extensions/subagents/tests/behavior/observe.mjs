@@ -12,7 +12,10 @@ import { files, oracle, simplePrompt, broadPrompt } from "./fixtures.mjs";
 const repository = fileURLToPath(new URL("../../../../", import.meta.url));
 const MAX_FRAME = 1024 * 1024;
 const MAX_STREAM = 32 * 1024 * 1024;
-const sourceFiles = ["extensions/method/index.ts", "extensions/method/assets/method.md", "extensions/subagents/index.ts", "extensions/subagents/runner.ts", "extensions/subagents/tasks.ts", "extensions/subagents/processes.ts", "extensions/subagents/posix-supervisor.mjs", "extensions/subagents/assets/helper.md"];
+const sourceFiles = ["extensions/method/index.ts", "extensions/method/assets/method.md", "extensions/subagents/index.ts", "extensions/subagents/runner.ts", "extensions/subagents/tasks.ts", "extensions/subagents/processes.ts", "extensions/subagents/posix-supervisor.mjs", "extensions/subagents/assets/helper.md", "extensions/presentation.ts"];
+// Analysis accepts immutable pre-migration artifacts; only ss_* tools are registered now.
+const isDelegate = (name) => ["ss_tasks_delegate", "stela_delegate"].includes(name);
+const isTaskControl = (name) => isDelegate(name) || ["ss_tasks_cancel", "stela_cancel"].includes(name);
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 const save = (path, value) => writeFileSync(path, typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 export function redact(text) {
@@ -56,11 +59,11 @@ export function publicEvent(event) {
 
 export function summarize(events) {
   const starts = new Map(events.filter((event) => event.type === "tool_execution_start").map((event) => [event.toolCallId, event]));
-  const admissions = events.filter((event) => event.type === "tool_execution_end" && event.toolName === "stela_delegate" && !event.isError && event.result?.details?.taskId)
+  const admissions = events.filter((event) => event.type === "tool_execution_end" && isDelegate(event.toolName) && !event.isError && event.result?.details?.taskId)
     .map((event) => ({ seq: event.seq, ...event.result.details, assignment: starts.get(event.toolCallId)?.args }));
   const results = events.filter((event) => event.type === "entry_appended" && event.entry?.customType === "stela-subagent-result")
     .map((event) => ({ seq: event.seq, entryId: event.entry.id, ...event.entry.details, content: event.entry.content }));
-  const work = events.filter((event) => event.type === "tool_execution_start" && !["stela_delegate", "stela_cancel"].includes(event.toolName)
+  const work = events.filter((event) => event.type === "tool_execution_start" && !isTaskControl(event.toolName)
     && admissions.some((admission) => admission.seq < event.seq && !results.some((result) => result.taskId === admission.taskId && result.seq < event.seq)))
     .map((event) => ({ seq: event.seq, toolName: event.toolName, args: event.args }));
   const messages = events.filter((event) => event.type === "message_end" && event.message.role === "assistant");
@@ -108,7 +111,7 @@ export function prepare(root, { cli, profile, model }) {
   const settingsText = readFileSync(settingsPath, "utf8");
   const settings = JSON.parse(settingsText);
   const help = execFileSync(process.execPath, [cli, "--offline", "--help"], { cwd: repository, env: { ...process.env, PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1" }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (!help.includes("--stela-subagent-concurrency")) throw new Error("The selected profile did not register the production subagent extension. No profile activation is performed by this experiment.");
+  if (!help.includes("--ss-tasks-concurrency")) throw new Error("The selected profile did not register the production subagent extension. No profile activation is performed by this experiment.");
   const routes = ["stela-method", "stela-subagents"].map((name) => ({ name, target: realpathSync(join(profile, "extensions", name)) }));
   if (routes[0].target !== join(repository, "extensions/method") || routes[1].target !== join(repository, "extensions/subagents")) throw new Error("Profile links do not point at this checkout; resolve the target before testing.");
   mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -160,10 +163,10 @@ async function runCase(item, manifest) {
       writeFileSync(output, `${JSON.stringify(record)}\n`, { flag: "a", mode: 0o600 });
     }
     if (event.type === "turn_start" && ++turns > manifest.limits.principalTurns) stop("Principal-turn observation bound reached; not a behavioral verdict.");
-    if (event.type === "tool_execution_end" && event.toolName === "stela_delegate" && !event.isError) {
+    if (event.type === "tool_execution_end" && isDelegate(event.toolName) && !event.isError) {
       const details = event.result?.details ?? {};
       console.log(`${item.id}: admitted ${details.taskId ?? "unknown"} | ${details.label ?? ""} | ${details.state ?? ""}`);
-      if (new Set(events.filter((record) => record.type === "tool_execution_end" && record.toolName === "stela_delegate" && !record.isError).map((record) => record.result?.details?.taskId)).size > manifest.limits.acceptedTasks) stop("Assignment observation bound reached; not a behavioral verdict.");
+      if (new Set(events.filter((record) => record.type === "tool_execution_end" && isDelegate(record.toolName) && !record.isError).map((record) => record.result?.details?.taskId)).size > manifest.limits.acceptedTasks) stop("Assignment observation bound reached; not a behavioral verdict.");
     }
     if (event.type === "entry_appended" && event.entry?.customType === "stela-subagent-result") console.log(`${item.id}: delivered ${event.entry.details?.taskId} | ${event.entry.details?.state}`);
   };

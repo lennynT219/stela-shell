@@ -3,14 +3,14 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function fixtureProvider(pi: ExtensionAPI) {
-  if (process.env.STELA_FIXTURE_ACTION === "permission-denied") {
+  if (process.env.SS_FIXTURE_ACTION === "permission-denied") {
     pi.on("tool_call", (event) => {
       if (event.toolName === "read") return { block: true, reason: "Fixture permission denied", terminate: true };
     });
   }
   let calls = 0;
-  pi.registerProvider("stela-fixture", {
-    baseUrl: "http://127.0.0.1:1/not-used", apiKey: "local-test-not-a-credential", api: "stela-fixture-api",
+  pi.registerProvider("ss-fixture", {
+    baseUrl: "http://127.0.0.1:1/not-used", apiKey: "local-test-not-a-credential", api: "ss-fixture-api",
     models: [{ id: "deterministic", name: "Local test fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 2048 }],
     streamSimple(model, context) {
       const stream = createAssistantMessageEventStream();
@@ -22,11 +22,11 @@ export default function fixtureProvider(pi: ExtensionAPI) {
         if (calls === 1) {
           stopReason = "toolUse";
           if (child) {
-            const writing = process.env.STELA_FIXTURE_ACTION === "write";
+            const writing = process.env.SS_FIXTURE_ACTION === "write";
             content.push({ type: "toolCall", id: "fixture-read", name: writing ? "write" : "read", arguments: writing ? { path: "forbidden.txt", content: "must not be written" } : { path: "source.txt" } });
-          } else content.push({ type: "toolCall", id: "fixture-delegate", name: "stela_delegate", arguments: {
+          } else content.push({ type: "toolCall", id: "fixture-delegate", name: "ss_tasks_delegate", arguments: {
             label: "Source evidence", objective: "Read source.txt and return its text as evidence", references: ["source.txt"], context: "", constraints: ["Read only"], done_when: "Return the observed evidence",
-            ...(process.env.STELA_FIXTURE_ACTION === "read" ? { timeout_seconds: 300 } : {}),
+            ...(process.env.SS_FIXTURE_ACTION === "read" ? { timeout_seconds: 300 } : {}),
           } });
         } else if (child) {
           const read = context.messages.findLast((message) => message.role === "toolResult");

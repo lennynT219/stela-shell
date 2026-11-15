@@ -65,7 +65,7 @@ export function validateAssignment(value: unknown): Assignment {
 }
 
 export function concurrencyLimit(value: unknown): number {
-  if (typeof value !== "string" || !/^[1-5]$/.test(value)) throw new Error("--stela-subagent-concurrency must be an integer from 1 to 5.");
+  if (typeof value !== "string" || !/^[1-5]$/.test(value)) throw new Error("--ss-tasks-concurrency must be an integer from 1 to 5.");
   return Number(value);
 }
 

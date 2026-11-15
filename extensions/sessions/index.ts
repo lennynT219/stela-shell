@@ -1,11 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import { formatMessage, Mailbox, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, type PeerInfo, type Received } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
 import type { OpenTransport, SessionTransport } from "./protocol.ts";
 
 export const MESSAGE_TYPE = "stela-peer-message";
-const WIDGET = "stela-sessions";
-interface Dependencies { profile: string; env?: NodeJS.ProcessEnv; open?: OpenTransport }
+const WIDGET = "ss-sessions";
+interface Dependencies { profile: string; env?: NodeJS.ProcessEnv; open?: OpenTransport; text?: MakeText }
 const result = (text: string, details: unknown) => ({ content: [{ type: "text" as const, text }], details });
 function preview(value: string, bytes: number): string {
   let output = "", used = 2;
@@ -23,6 +24,7 @@ function discoveryInfo(peer: PeerInfo): PeerInfo {
 /** Startup and callable tools are both excluded for helpers; a tool guard alone is insufficient. */
 export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): void {
   if ((dependencies.env ?? process.env).STELA_SUBAGENT_CHILD) return;
+  if (dependencies.text) pi.registerMessageRenderer(MESSAGE_TYPE, messageRenderer("Mensaje", dependencies.text));
   const open = dependencies.open ?? PeerTransport.open;
   let owner: ExtensionContext | undefined, ownerId: string | undefined, transport: SessionTransport | undefined;
   let mailbox = new Mailbox(), generation = 0, startup: AbortController | undefined;
@@ -30,7 +32,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
 
   const owns = (ctx: ExtensionContext) => owner?.sessionManager === ctx.sessionManager && ownerId === ctx.sessionManager.getSessionId();
   const widget = () => {
-    try { if (owner?.hasUI) owner.ui.setWidget(WIDGET, transport ? [`Stela sessions · ${transport.info.id} · ${mailbox.pending} pending${paused ? " · paused" : ""}`] : undefined); }
+    try { if (owner?.hasUI) owner.ui.setWidget(WIDGET, transport ? [`Sesiones · ${transport.info.id} · ${mailbox.pending} pendientes${paused ? " · pausado" : ""}`] : undefined); }
     catch { /* presentation cannot change admission or block resource cleanup */ }
   };
   const acknowledge = (ctx: ExtensionContext) => {
@@ -57,7 +59,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
       pi.sendMessage(draft(next), { triggerTurn: true, deliverAs: "followUp" });
     } catch {
       paused = true;
-      try { if (owner.hasUI) owner.ui.notify("Peer message injection failed; delivery is not confirmed. Messaging paused until human input or /stela-sessions on.", "warning"); } catch { /* best-effort presentation */ }
+      try { if (owner.hasUI) owner.ui.notify("Peer message injection failed; delivery is not confirmed. Messaging paused until human input or /ss-sessions on.", "warning"); } catch { /* best-effort presentation */ }
       widget();
     }
   };
@@ -73,7 +75,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     const stopping = stop(), version = generation;
     await stopping;
     if (generation !== version) return;
-    if (disabled || pi.getFlag("stela-sessions-disabled")) { unavailable = "Session messaging is disabled."; return; }
+    if (disabled || pi.getFlag("ss-sessions-disabled")) { unavailable = "Session messaging is disabled."; return; }
     const controller = new AbortController(); startup = controller;
     owner = ctx; ownerId = ctx.sessionManager.getSessionId(); paused = false;
     try {
@@ -88,11 +90,11 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     } catch (error) {
       if (generation !== version) return;
       unavailable = error instanceof Error ? error.message : "Local messaging startup failed.";
-      if (ctx.hasUI) ctx.ui.notify(`Stela sessions unavailable: ${unavailable}`, "warning");
+      if (ctx.hasUI) ctx.ui.notify(`Sesiones no disponibles: ${unavailable}`, "warning");
     }
   };
   const requireTransport = (ctx: ExtensionContext) => {
-    if (!transport || !owns(ctx)) throw new Error(`Stela sessions unavailable: ${unavailable || "no transport for this activation"}`);
+    if (!transport || !owns(ctx)) throw new Error(`stela-shell sessions unavailable: ${unavailable || "no transport for this activation"}`);
     return transport;
   };
   const append = (event: { outcome: string; entries: any[] }, ctx: ExtensionContext) => {
@@ -106,7 +108,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     return { entries: [...event.entries, { type: "custom_message" as const, ...draft(next) }], continue: true };
   };
 
-  pi.registerFlag("stela-sessions-disabled", { description: "Disable primary-session presence, send and automatic incoming activation.", type: "boolean", default: false });
+  pi.registerFlag("ss-sessions-disabled", { description: "Disable primary-session presence, send and automatic incoming activation.", type: "boolean", default: false });
   pi.on("session_start", start);
   for (const event of ["session_before_switch", "session_before_fork", "session_before_tree"] as const) {
     pi.on(event, () => { paused = true; widget(); });
@@ -135,10 +137,11 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   });
 
   pi.registerTool({
-    name: "stela_sessions", label: "Stela · Sessions",
-    description: "Discover currently reachable PRIMARY Stela activations in this local profile (up to 32 candidates). No helpers, remote sessions or saved-session transcript search. IDs identify live activations, not display names.",
-    promptSnippet: "Discover reachable local primary Stela sessions",
-    promptGuidelines: ["Use stela_sessions for useful coordination or delegated primary-session work, not task-status polling. Presence alone is not a task request; concrete stela_message requests are actionable under the user's collaboration policy without granting new permissions."],
+    name: "ss_sessions_list", label: "Sesiones",
+    renderCall: callRenderer("ss_sessions_list", "Sesiones", dependencies.text),
+    description: "Discover currently reachable PRIMARY stela-shell activations in this local profile (up to 32 candidates). No helpers, remote sessions or saved-session transcript search. IDs identify live activations, not display names.",
+    promptSnippet: "Discover reachable local primary stela-shell sessions",
+    promptGuidelines: ["Use ss_sessions_list for useful coordination or delegated primary-session work, not task-status polling. Presence alone is not a task request; concrete ss_sessions_send requests are actionable under the user's collaboration policy without granting new permissions."],
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     parameters: { type: "object", additionalProperties: false, properties: {} } as never,
     async execute(_id, _params, signal, _update, ctx) {
@@ -151,15 +154,16 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     },
   });
   pi.registerTool({
-    name: "stela_message", label: "Stela · Message", exposure: "model-only",
+    name: "ss_sessions_send", label: "Enviar mensaje", exposure: "model-only",
+    renderCall: callRenderer("ss_sessions_send", "Enviar mensaje", dependencies.text),
     description: "Assign work, send context or reply to a PRIMARY session's exact local activation ID (up to 8 KiB UTF-8). Concrete requests are actionable delegated tasks using the receiver's own tools/permissions, not permission overrides. Returns accepted-for-delivery, NOT read/completed. Replies arrive automatically; no approval dialog, blocking ask or automatic retry.",
-    promptSnippet: "Assign bounded work, send context or reply to a primary Stela session",
+    promptSnippet: "Assign bounded work, send context or reply to a primary stela-shell session",
     promptGuidelines: [
-      `For stela_message collaboration: ${PEER_TASK_POLICY}`,
-      `When handling stela_message work: ${PEER_TASK_BOUNDARIES}`,
-      "Use stela_message for useful coordination and concrete delegated tasks. Do not copy secrets or whole conversations or transfer tool permissions.",
-      "Use stela_message with exact activation IDs from stela_sessions or an incoming peer message. For a reply, supply its message ID as reply_to. Delivery/response may start model turns automatically. A receipt only means accepted into memory, not read, verified or completed work.",
-      "After stela_message, continue independent work. If a reply is needed and nothing else remains, state it is pending; do not poll, sleep, repeatedly ask, or resend because an ACK/reply is missing. No automatic unavailable/acknowledgment replies or echo loops. Stop when the exchange is complete or a budget is reached.",
+      `For ss_sessions_send collaboration: ${PEER_TASK_POLICY}`,
+      `When handling ss_sessions_send work: ${PEER_TASK_BOUNDARIES}`,
+      "Use ss_sessions_send for useful coordination and concrete delegated tasks. Do not copy secrets or whole conversations or transfer tool permissions.",
+      "Use ss_sessions_send with exact activation IDs from ss_sessions_list or an incoming peer message. For a reply, supply its message ID as reply_to. Delivery/response may start model turns automatically. A receipt only means accepted into memory, not read, verified or completed work.",
+      "After ss_sessions_send, continue independent work. If a reply is needed and nothing else remains, state it is pending; do not poll, sleep, repeatedly ask, or resend because an ACK/reply is missing. No automatic unavailable/acknowledgment replies or echo loops. Stop when the exchange is complete or a budget is reached.",
     ],
     parameters: { type: "object", additionalProperties: false, required: ["to", "text"], properties: {
       to: { type: "string", pattern: "^[a-f0-9]{32}$", description: "Exact live activation ID; not a name or Pi session ID." },
@@ -168,7 +172,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     async execute(_id, params, signal, _update, ctx) {
       signal?.throwIfAborted();
       const current = requireTransport(ctx), version = generation;
-      if (paused) throw new Error("Messaging is paused after interruption/injection failure; human input or /stela-sessions on is required.");
+      if (paused) throw new Error("Messaging is paused after interruption/injection failure; human input or /ss-sessions on is required.");
       const { to, text, reply_to } = params as { to: string; text: string; reply_to?: string };
       if (to === current.info.id) throw new Error("Cannot message this activation itself.");
       const message = mailbox.prepare(to, text, reply_to);
@@ -178,15 +182,15 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
       return result(`Accepted for delivery: ${message.id} to ${to}. Not a read/completion receipt. Replies arrive automatically; continue independent work or honestly report a pending reply.`, { messageId: message.id, to, thread: message.thread, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false });
     },
   });
-  pi.registerCommand("stela-sessions", {
-    description: "Show local primary activations; off closes messaging, on starts a fresh activation. No model invocation.",
+  pi.registerCommand("ss-sessions", {
+    description: "Ver sesiones locales; off desconecta y on inicia una activación nueva.",
     handler: async (args, ctx) => {
       const command = args.trim();
       if (command === "off") { disabled = true; unavailable = "Session messaging is disabled."; await stop(); }
       else if (command === "on") { disabled = false; await start(undefined, ctx); }
-      else if (command) { if (ctx.hasUI) ctx.ui.notify("Usage: /stela-sessions [off|on]", "warning"); return; }
+      else if (command) { if (ctx.hasUI) ctx.ui.notify("Usage: /ss-sessions [off|on]", "warning"); return; }
       const peers: PeerInfo[] = transport ? await transport.list(ctx.signal) : [];
-      if (ctx.hasUI) ctx.ui.notify(transport ? [`Self: ${transport.info.id}${paused ? " (paused)" : ""}`, ...peers.map((peer) => `${peer.id} | ${quoted(peer.name || peer.sessionId)} | ${quoted(peer.cwd)}`)].join("\n") : `Stela sessions unavailable: ${unavailable}`, "info");
+      if (ctx.hasUI) ctx.ui.notify(transport ? [`Self: ${transport.info.id}${paused ? " (paused)" : ""}`, ...peers.map((peer) => `${peer.id} | ${quoted(peer.name || peer.sessionId)} | ${quoted(peer.cwd)}`)].join("\n") : `Sesiones no disponibles: ${unavailable}`, "info");
     },
   });
 }
@@ -194,5 +198,6 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
 export default async function sessions(pi: ExtensionAPI): Promise<void> {
   if (process.env.STELA_SUBAGENT_CHILD) return;
   const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
-  registerSessions(pi, { profile: getAgentDir() });
+  const { Text } = await import("@earendil-works/pi-tui");
+  registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0) });
 }

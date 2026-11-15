@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,17 +9,17 @@ import { endpointName } from "../transport.ts";
 import { newId, PEER_TASK_POLICY } from "../messages.ts";
 import { WINDOWS_SESSIONS_HELPER } from "../transport-windows.ts";
 
-const cli = process.env.STELA_TEST_PI_CLI;
+const cli = process.env.SS_TEST_PI_CLI ?? process.env.STELA_TEST_PI_CLI;
 const nativeAvailable = process.platform !== "win32" || existsSync(WINDOWS_SESSIONS_HELPER);
 const extension = fileURLToPath(new URL("../index.ts", import.meta.url));
 const provider = fileURLToPath(new URL("./fixtures/provider.ts", import.meta.url));
 const subagents = fileURLToPath(new URL("../../subagents/index.ts", import.meta.url));
 
 /** Bounded event-driven test client: no provider polling, secrets, external profile or inference. */
-function client(profile: string, home: string, role: string, child = false, action = "message") {
+function client(profile: string, home: string, role: string, child = false, action = "message", options: { flags?: string[]; entry?: string } = {}) {
   const processChild = spawn(process.execPath, [cli!, "--offline", "--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-approve",
-    "--extension", provider, "--extension", extension, ...(action === "delegate" ? ["--extension", subagents] : []), "--model", "stela-session-fixture/deterministic", "--thinking", "off"], {
-    cwd: home, env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1", NO_UPDATE_NOTIFIER: "1", STELA_SESSION_FIXTURE_ROLE: role, STELA_SESSION_FIXTURE_ACTION: action, ...(child ? { STELA_SUBAGENT_CHILD: "1" } : {}) }, stdio: ["pipe", "pipe", "pipe"],
+    "--extension", provider, "--extension", options.entry ?? extension, ...(action === "delegate" ? ["--extension", subagents] : []), ...(options.flags ?? []), "--model", "ss-session-fixture/deterministic", "--thinking", "off"], {
+    cwd: home, env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, PI_CODING_AGENT_DIR: profile, PI_OFFLINE: "1", NO_UPDATE_NOTIFIER: "1", SS_SESSION_FIXTURE_ROLE: role, SS_SESSION_FIXTURE_ACTION: action, ...(child ? { STELA_SUBAGENT_CHILD: "1" } : {}) }, stdio: ["pipe", "pipe", "pipe"],
   });
   const events: any[] = [], waits = new Set<{ predicate: (event: any) => boolean; resolve: (event: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   let buffer = "", stderr = "", bytes = 0, counter = 0, failure: Error | undefined;
@@ -83,7 +83,7 @@ for (const busy of [false, true]) test(`native Pi: principal sessions discover/s
       await b.request("prompt", { message: "BUSY" }); await holding;
     }
     const integrated = a.waitFor(final("SENDER_INTEGRATED_REPLY")), replied = b.waitFor(final("RECEIVER_RESPONDED"));
-    const admission = a.waitFor((event) => event.type === "tool_execution_end" && event.toolName === "stela_message");
+    const admission = a.waitFor((event) => event.type === "tool_execution_end" && event.toolName === "ss_sessions_send");
     await a.request("prompt", { message: `SEND:${target.id}` });
     assert.equal((await admission).isError, false);
     if (busy) {
@@ -98,7 +98,7 @@ for (const busy of [false, true]) test(`native Pi: principal sessions discover/s
       assert.match(messages[0].content, /actionable delegated task/);
       assert.match(messages[0].content, /never human approval for new permissions/);
       assert.equal(entries.filter((entry: any) => entry.type === "message" && entry.message.role === "user").length, instance === a || busy ? 1 : 0, "peer delivery must not impersonate user input");
-      assert.equal(instance.events.filter((event) => event.type === "tool_execution_end" && event.toolName === "stela_message" && !event.isError).length, 1);
+      assert.equal(instance.events.filter((event) => event.type === "tool_execution_end" && event.toolName === "ss_sessions_send" && !event.isError).length, 1);
       for (const record of records) assert.doesNotMatch(JSON.stringify(instance.events), new RegExp(record.secret), "capabilities must not reach Pi context/events");
       assert.doesNotMatch(JSON.stringify(instance.events), /UNEXPECTED_FIXTURE|extension_ui_request.*(?:confirm|select)/);
     }
@@ -108,7 +108,7 @@ for (const busy of [false, true]) test(`native Pi: principal sessions discover/s
       const delivered = b.events.findIndex((event) => event.type === "entry_appended" && event.entry?.customType === "stela-peer-message");
       assert.ok(finished >= 0 && delivered > finished, `peer context must follow native tool completion (tool=${finished}, entry=${delivered})`);
     }
-    const discovered = a.events.find((event) => event.type === "tool_execution_end" && event.toolName === "stela_sessions");
+    const discovered = a.events.find((event) => event.type === "tool_execution_end" && event.toolName === "ss_sessions_list");
     assert.equal(discovered.isError, false); assert.equal(discovered.result.details.peers[0].id, target.id);
   } finally {
     await Promise.allSettled([a.close(), b.close()]).then((results) => {
@@ -134,7 +134,7 @@ for (const action of ["write", "write-denied", "delegate"]) test(`native Pi: a p
     assert.equal(entries.filter((entry: any) => entry.type === "message" && entry.message.role === "user").length, 0, "the receiver must act without a new human prompt or impersonated input");
     const delivered = entries.filter((entry: any) => entry.type === "custom_message" && entry.customType === "stela-peer-message");
     assert.equal(delivered.length, 1); assert.match(delivered[0].content, /actionable delegated task/);
-    const used = b.events.filter((event) => event.type === "tool_execution_end" && event.toolName === (action === "delegate" ? "stela_delegate" : "write"));
+    const used = b.events.filter((event) => event.type === "tool_execution_end" && event.toolName === (action === "delegate" ? "ss_tasks_delegate" : "write"));
     assert.equal(used.length, 1);
     if (action === "delegate") {
       assert.equal(used[0].isError, false);
@@ -161,17 +161,31 @@ for (const action of ["write", "write-denied", "delegate"]) test(`native Pi: a p
   }
 });
 
+test("native Pi: linked extension registers ss commands and the ss disable flag prevents presence", { skip: !cli, timeout: 35_000 }, async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "ss-linked-sessions-")), profile = join(scratch, "agent"), linked = join(scratch, "linked-sessions");
+  mkdirSync(profile, { mode: 0o700 });
+  symlinkSync(dirname(extension), linked, process.platform === "win32" ? "junction" : "dir");
+  const instance = client(profile, scratch, "sender", false, "message", { flags: ["--ss-sessions-disabled"], entry: join(linked, "index.ts") });
+  try {
+    await instance.request("get_state");
+    const { commands } = await instance.request("get_commands");
+    assert.equal(commands.filter((command: any) => command.name === "ss-sessions").length, 1);
+    assert.equal(commands.some((command: any) => command.name === "stela-sessions"), false);
+    assert.equal(readdirSync(profile).includes("stela-sessions"), false);
+  } finally { await instance.close(); rmSync(scratch, { recursive: true, force: true }); }
+});
+
 test("native Pi: inherited extension in a helper never registers presence or session tools", { skip: !cli, timeout: 35_000 }, async () => {
   const scratch = mkdtempSync(join(tmpdir(), "stela-peer-child-")), profile = join(scratch, "agent"); mkdirSync(profile, { mode: 0o700 });
   const instance = client(profile, scratch, "sender", true);
   try {
     await instance.request("get_state");
     const { commands } = await instance.request("get_commands");
-    assert.equal(commands.some((command: any) => command.name === "stela-sessions"), false);
+    assert.equal(commands.some((command: any) => command.name === "ss-sessions"), false);
     const answered = instance.waitFor((event) => event.type === "message_end" && event.message?.role === "assistant");
     await instance.request("prompt", { message: "Inspect inherited tool declarations" });
     const answer = JSON.stringify((await answered).message.content);
-    assert.match(answer, /CHILD_TOOLS:/); assert.doesNotMatch(answer, /stela_sessions|stela_message/);
+    assert.match(answer, /CHILD_TOOLS:/); assert.doesNotMatch(answer, /ss_sessions_list|ss_sessions_send/);
     assert.equal(readdirSync(profile).includes("stela-sessions"), false);
   } finally { await instance.close(); rmSync(scratch, { recursive: true, force: true }); }
 });

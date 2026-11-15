@@ -55,7 +55,7 @@ test("factory registration alone creates no resource; idle delivery is custom an
   assert.match(h.sent[0].message.content, /not direct human input/);
   assert.equal(h.transports[0].receive(sender(), incoming()), "accepted"); await tick();
   assert.equal(h.sent.length, 1, "busy/in-flight mail stays in the bounded inbox");
-  assert.ok(h.widgets.some(([, lines]) => lines?.[0].includes("2 pending")), "a queued Pi message is not marked committed");
+  assert.ok(h.widgets.some(([, lines]) => lines?.[0].includes("2 pendientes")), "a queued Pi message is not marked committed");
   await h.emit("session_shutdown"); assert.equal(h.transports[0].closed, true);
 });
 
@@ -69,9 +69,9 @@ test("busy delivery waits for a completed boundary and acknowledgment requires t
   assert.equal(proposal.entries[0].customType, MESSAGE_TYPE);
   assert.equal(await h.emit("agent_before_settle", { outcome: "completed", entries: proposal.entries }), undefined);
   h.branch.push({ ...proposal.entries[0], details: { ...proposal.entries[0].details, activation: newId() } });
-  await h.emit("context"); assert.ok(h.widgets.at(-1)[1][0].includes("1 pending"));
-  h.branch.push(proposal.entries[0]); await h.emit("context"); assert.ok(h.widgets.at(-1)[1][0].includes("0 pending"));
-  const receipt = await h.tools.get("stela_message").execute("call", { to: from.id, text: "Reply", reply_to: value.id }, undefined, undefined, h.ctx);
+  await h.emit("context"); assert.ok(h.widgets.at(-1)[1][0].includes("1 pendientes"));
+  h.branch.push(proposal.entries[0]); await h.emit("context"); assert.ok(h.widgets.at(-1)[1][0].includes("0 pendientes"));
+  const receipt = await h.tools.get("ss_sessions_send").execute("call", { to: from.id, text: "Reply", reply_to: value.id }, undefined, undefined, h.ctx);
   assert.equal(receipt.details.status, "accepted"); assert.equal(receipt.details.thread, value.thread);
   assert.doesNotMatch(JSON.stringify(receipt), /secret|proof|read.*true/);
 });
@@ -95,10 +95,10 @@ test("navigation/replacement revokes the old activation; disable does not reques
   assert.throws(() => old.receive(sender(), incoming()), /no longer receiving/);
   h.setSession("principal-b"); await h.emit("session_start");
   assert.equal(h.transports[1].closed, true); assert.equal(h.transports[2].info.sessionId, "principal-b");
-  await h.commands.get("stela-sessions").handler("off", h.ctx);
+  await h.commands.get("ss-sessions").handler("off", h.ctx);
   assert.equal(h.transports[2].closed, true);
-  await assert.rejects(h.tools.get("stela_sessions").execute("list", {}, undefined, undefined, h.ctx), /disabled/);
-  await h.commands.get("stela-sessions").handler("on", h.ctx); assert.equal(h.transports.length, 4);
+  await assert.rejects(h.tools.get("ss_sessions_list").execute("list", {}, undefined, undefined, h.ctx), /disabled/);
+  await h.commands.get("ss-sessions").handler("on", h.ctx); assert.equal(h.transports.length, 4);
 });
 
 test("concurrent starts publish only the latest owned generation", async () => {
@@ -107,9 +107,9 @@ test("concurrent starts publish only the latest owned generation", async () => {
 });
 
 test("CLI disable prevents startup; integration rules preserve user authority and no polling", async () => {
-  const h = harness(); h.flags.set("stela-sessions-disabled", true); await h.emit("session_start");
+  const h = harness(); h.flags.set("ss-sessions-disabled", true); await h.emit("session_start");
   assert.equal(h.transports.length, 0);
-  const tool = h.tools.get("stela_message");
+  const tool = h.tools.get("ss_sessions_send");
   const guidelines = tool.promptGuidelines.join(" ");
   assert.equal(tool.exposure, "model-only"); assert.match(guidelines, /never human approval for new permissions/);
   assert.ok(guidelines.includes(PEER_TASK_POLICY)); assert.ok(guidelines.includes(PEER_TASK_BOUNDARIES));
@@ -124,7 +124,7 @@ test("escaped discovery output is bounded, parseable and preserves full activati
   const h = harness(); await h.emit("session_start");
   const peers = Array.from({ length: 32 }, () => ({ id: newId(), sessionId: "\u0001".repeat(128), name: "\u202e".repeat(80), cwd: "\u0001".repeat(1024) }));
   h.transports[0].list = async () => peers;
-  const answer = await h.tools.get("stela_sessions").execute("list", {}, undefined, undefined, h.ctx);
+  const answer = await h.tools.get("ss_sessions_list").execute("list", {}, undefined, undefined, h.ctx);
   const text = answer.content[0].text;
   assert.ok(Buffer.byteLength(text) < 16 * 1024); assert.doesNotMatch(text, /\u0001|\u202e/);
   const data = JSON.parse(text); assert.deepEqual(data.peers.map((item: any) => item.id), peers.map((item) => item.id));
@@ -158,16 +158,17 @@ test("metadata hooks await the transport and late completion cannot reactivate a
   await tick(); assert.equal(completed, false);
   await h.emit("session_shutdown"); finish(); await updating;
   assert.equal(h.transports[0].closed, true); assert.equal(h.transports.length, 1);
-  await assert.rejects(h.tools.get("stela_sessions").execute("list", {}, undefined, undefined, h.ctx), /unavailable/);
+  await assert.rejects(h.tools.get("ss_sessions_list").execute("list", {}, undefined, undefined, h.ctx), /unavailable/);
 });
-test("package retains session registration/tests and excludes the retired web integration", () => {
+test("package retains session coverage and integrates only the approved owned web extension/dependencies", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
   assert.deepEqual(manifest.pi.extensions, [
     "./extensions/method/index.ts",
     "./extensions/subagents/index.ts",
     "./extensions/sessions/index.ts",
+    "./extensions/web/index.ts",
   ]);
   assert.match(manifest.scripts.test, /extensions\/sessions\/tests\/\*\.test\.ts/);
-  assert.doesNotMatch(manifest.scripts.test, /extensions\/web\//);
-  assert.deepEqual(manifest.dependencies ?? {}, {});
+  assert.match(manifest.scripts.test, /extensions\/web\/tests\/\*\.test\.ts/);
+  assert.deepEqual(manifest.dependencies, { "@mozilla/readability": "0.6.0", linkedom: "0.16.11", turndown: "7.2.5" });
 });

@@ -8,6 +8,7 @@ Read [WORK_STATE.md](WORK_STATE.md) for the latest local work record and [the FA
 
 Build a personalized environment around Pi, progressively selecting useful capabilities from the reference projects instead of copying an entire distribution.
 
+- Stela is the company; stela-shell is the product (existing display spelling: StelaShell). The user approved `ss` and authorized migrating the existing public surface before new web functionality. Follow [Naming conventions](NAMING.md): English technical identifiers, short Spanish visible titles, no blind renaming of native/persisted/profile contracts.
 - Pi remains the agent and host. Do not replace its conversation loop, sessions, or model infrastructure with a Rust reimplementation.
 - Rust is intended for selected executable tools, a launcher, and installation responsibilities when these become necessary. This does not authorize rewriting every upstream tool.
 - Use small TypeScript/JavaScript extensions for Pi's lifecycle, prompt, tool, and UI integration. A Rust component needs an integration boundary; no universal bridge has been selected.
@@ -46,9 +47,11 @@ stela-shell/
 ├── README.md
 ├── docs/
 │   ├── WORK_STATE.md
+│   ├── NAMING.md
 │   └── PROJECT_CONTEXT.md
 ├── native/windows-job/   # Windows-only controller; Cargo.toml, Cargo.lock, src/
 └── extensions/
+    ├── presentation.ts   # Shared display-only headers; host Text component.
     ├── method/
     │   ├── index.ts
     │   └── assets/method.md
@@ -60,12 +63,15 @@ stela-shell/
     │   ├── tasks.ts
     │   ├── assets/helper.md
     │   └── tests/
-    └── sessions/
-        ├── index.ts
-        ├── messages.ts
-        ├── transport.ts
+    ├── sessions/
+    │   ├── index.ts
+    │   ├── messages.ts
+    │   ├── transport.ts
+    │   ├── README.md
+    │   └── tests/
+    └── web/              # Owned search/read, bounded Node parser; root dependencies.
         ├── README.md
-        └── tests/
+        └── THIRD_PARTY_NOTICES.md
 ```
 
 Keep relevant tests organized by the capability they verify. Do not create empty placeholder tests or assume an untracked empty directory will be preserved by Git.
@@ -91,13 +97,13 @@ The supplied Fish launch command is:
 env PI_CODING_AGENT_DIR="$HOME/.stela-shell/agent" pi
 ```
 
-The supplied persistent alias is:
+A product-specific Fish alias example is (not automatically installed):
 
 ```fish
-alias --save stela 'env PI_CODING_AGENT_DIR="$HOME/.stela-shell/agent" pi'
+alias --save stela-shell 'env PI_CODING_AGENT_DIR="$HOME/.stela-shell/agent" pi'
 ```
 
-The alias is for that user's Fish sessions, not all users, shells, or computers. It forwards arguments, such as `stela --continue`, and does not change `pi` itself. Do not recreate or overwrite it merely because this document shows it.
+This example forwards arguments, such as `stela-shell --continue`, and does not change `pi` itself. Existing aliases are machine-local historical state, not renamed by this documentation. Do not create or overwrite an alias merely because it is shown here; `ss` is a technical namespace, not a global shell alias that would shadow Linux's socket utility.
 
 A profile is configuration separation, not an OS sandbox. Do not copy credentials, personal session histories, or unrelated settings into the source repository. Git does not transfer the external profile, symlink, alias, or Engram database to another computer.
 
@@ -151,7 +157,7 @@ The newer implementation makes the continuity mechanism concrete; do not leave t
 
 ## 5. Subagents: outcome-oriented core
 
-The user approved and authorized a core based on bounded evidence questions rather than a fixed catalog or sequence of specialists. One reusable definition, `stela-helper`, receives a concrete objective, minimal context, authorized references, constraints and a completion criterion. The useful result, not a role name, determines delegation. Exploration/implementation/verification remain possible kinds of work, not required agent definitions.
+The user approved and authorized a core based on bounded evidence questions rather than a fixed catalog or sequence of specialists. One reusable definition, `ss-helper`, receives a concrete objective, minimal context, authorized references, constraints and a completion criterion. The useful result, not a role name, determines delegation. Exploration/implementation/verification remain possible kinds of work, not required agent definitions.
 
 These earlier functional agreements remain relevant with that refinement:
 
@@ -169,8 +175,8 @@ The read-only comparison is complete. StelaShell implements its own extension us
 
 ### Authorized first core
 
-- `stela_delegate` admits a bounded read-only assignment and returns an ID without waiting; `stela_cancel` cancels it. Children cannot delegate, write, run shell commands, create indexes or maintain project continuity.
-- **Five simultaneous children is the user-selected default and maximum**, replacing the earlier proposal of two. A launch may reduce it with `--stela-subagent-concurrency`; useful independent work determines actual usage.
+- `ss_tasks_delegate` admits a bounded read-only assignment and returns an ID without waiting; `ss_tasks_cancel` cancels it. Children cannot delegate, write, run shell commands, create indexes or maintain project continuity.
+- **Five simultaneous children is the user-selected default and maximum**, replacing the earlier proposal of two. A launch may reduce it with `--ss-tasks-concurrency`; useful independent work determines actual usage.
 - Children inherit the parent's model and thinking level at admission. Specialized model profiles, provider-specific cost choices and fallback chains are not selected.
 - FARO section 3 instructs the parent to initiate beneficial delegation inside the authorized task without waiting for the user to mention subagents, while resolving simple retrieval directly. The tool guidelines follow that policy; the helper applies FARO only within its bounded read-only role. This is model-guided initiative, not a background scheduler or a guarantee of delegation on every task. Instruction checks and observed spontaneous model choice are distinct; see WORK_STATE.
 - The parent retains integration and continuity responsibility. FARO's handoff rule now asks for one coherent objective, splitting oversized work only at independently useful outcome boundaries, not a child per file or mandatory stages. Tool guidelines reference that policy rather than duplicating it. Results carry concise answers, evidence and limitations; process completion does not prove requirement satisfaction.
@@ -183,7 +189,7 @@ The read-only comparison is complete. StelaShell implements its own extension us
 
 ### Independent primary-session messaging
 
-The user separately authorized an owned TypeScript capability for automatic local communication between primary sessions in the same profile, with no approval prompt per peer or message. `extensions/sessions/` integrates with Pi using shared TypeScript policy/protocol. POSIX uses Node built-ins; the subsequently approved Windows backend uses a separate explicitly built Rust executable in `native/windows-sessions/` and the existing pinned windows-sys family, without a messaging daemon or changes to the subagent controller. The helper contract above is unchanged: helpers are excluded before presence/IPC startup and parent/helper dialogue is deferred. The user's collaboration policy authorizes concrete peer requests as actionable delegated tasks using the receiver's own available tools and permissions, including ordinary file edits, commands and proportional bounded helper assignments. A new human prompt is not required solely because a task came from a peer. Messages retain peer provenance and cannot transfer permissions, override direct user restrictions or denials, or provide required human approval for protected actions. Helpers remain read-only over authorized existing references; this does not add web capabilities. Consult the [session extension README](../extensions/sessions/README.md) for the tools, bounds and loading instructions, and WORK_STATE for current evidence. The native Windows backend now uses handle-relative protected state, explicit DACLs, local pipes, peer SID/process verification and bounded private IPC; missing artifacts/unsafe state fail closed. Native deterministic Windows checks pass, but its independent security review timed out without an answer. Shared-code changes still need fresh Linux regression evidence; no macOS/TUI/real-provider certification is claimed. Profile activation, dependencies, real-provider experiments and publication need their corresponding authorization.
+The user separately authorized an owned TypeScript capability for automatic local communication between primary sessions in the same profile, with no approval prompt per peer or message. `extensions/sessions/` integrates with Pi using shared TypeScript policy/protocol. POSIX uses Node built-ins; the subsequently approved Windows backend uses a separate explicitly built Rust executable in `native/windows-sessions/` and the existing pinned windows-sys family, without a messaging daemon or changes to the subagent controller. The helper contract above is unchanged: helpers are excluded before presence/IPC startup and parent/helper dialogue is deferred. The user's collaboration policy authorizes concrete peer requests as actionable delegated tasks using the receiver's own available tools and permissions, including ordinary file edits, commands and proportional bounded helper assignments. A new human prompt is not required solely because a task came from a peer. Messages retain peer provenance and cannot transfer permissions, override direct user restrictions or denials, or provide required human approval for protected actions. Helpers remain read-only over authorized existing references; this does not add web capabilities. Consult the [session extension README](../extensions/sessions/README.md) for the tools, bounds and loading instructions, and WORK_STATE for current evidence. The native Windows backend now uses handle-relative protected state, explicit DACLs, local pipes, peer SID/process verification and bounded private IPC; missing artifacts/unsafe state fail closed. Native deterministic Windows checks pass, but its independent security review timed out without an answer. The shared-code extraction's POSIX send regression was repaired by restoring the missing `envelope` import; fresh focused Linux session/Pi checks pass. The unused invalid shared hash helper was removed without changing wire behavior or Windows source. See WORK_STATE for current evidence; no macOS/TUI/real-provider certification is claimed. Profile activation, dependencies, real-provider experiments and publication need their corresponding authorization.
 
 Concrete specialized child models, profiles, costs, and effort policies remain undecided or unverified. A global metadata audit was denied and then explicitly deferred. Do not resume it automatically or route around that denial. Its recorded error was: `Permission configuration is human-controlled. Use the mode settings UI; model tools cannot change it.` Historical permission is not current runtime consent.
 
@@ -196,7 +202,7 @@ The goal is useful capabilities with bounded context and nonduplicative verifica
 - **Pi execution versus presentation:** source inventories showed Pi-owned file/search/bash execution with additional rendering in Gentle Shell. Collapsed tool cards do not necessarily reduce text sent to the model.
 - **Codemode:** Pi supplies tool orchestration and output filtering. It does not require Context7 or MCP to operate on native tools. Completed side effects are not rolled back when a later script call fails; nested permissions still apply. The user previously reported enabling it in a comparison environment, not a verified inventory of every future StelaShell session.
 - **Pi Lens and CodeGraph:** possible discovery tools, not mandatory additions. Their retention or removal is unresolved. CodeGraph needs an executable and index; initialization and even maintenance during queries can write local state. Do not classify an action as read-only solely by its tool name.
-- **Optional companions:** web tools, memory, coordination, voice, and other packages are not automatically available just because Gentle Shell exposes names for them. The user replaced the previous local-reader/native-Exa-MCP direction and explicitly chose one internal extension distributed with StelaShell, based on useful pi-web-access code for search and ordinary page reading—not a separate package. The authorized web retirement is complete: old source/tests/parser dependency, Windows loading junction and Exa MCP entry are removed, without changing FARO/subagents/session runtime or Git history. The checkpointed [package scaffold](../packages/web/README.md) is inactive and its independent-package architecture is superseded; it has not been migrated/deleted for the current proposal. Proposed extension code and three root extraction dependencies remain unimplemented/unapproved for installation. The [replacement plan](WEB_DOCUMENTATION_PLAN.md) records reuse, license, limitations and next checks; old live tests do not verify new behavior.
+- **Optional companions:** capabilities are not available merely because Gentle Shell exposes their names. The owned integrated web replacement is now implemented after the ss migration: ss_web_search and ss_web_read, root-only exact extraction dependencies, shared bounded public-HTTPS transport and a short-lived Node parser. The retired reader/native Exa MCP/profile junction remain removed. The [web README](../extensions/web/README.md) documents operation, limits and attribution; the [approved design](WEB_DOCUMENTATION_PLAN.md) records scope. Final Linux integrated evidence is 181 passing / 24 Windows-only skipped / zero failed (205 total), followed by a user-requested peer live smoke: three Exa/MDN results (partial due to snippet clipping) and one selected MDN page read (ok, readability+turndown, no truncation). No agent-triggered reload was performed. The user subsequently authorized the current Linux web-only development link, now created as ~/.stela-shell/agent/extensions/ss-web; settings and existing links are unchanged. The receiving primary has used both canonical tools; other instances may need operator-controlled /reload or a fresh session if the tools are absent. The independent static web-control review timed out without an answer and was not retried. HTML fails closed on Bun because its worker heap/stack limits are unavailable; Node 24.22.2/Pi 1.5.2 were exercised. Old live reader tests do not certify the replacement. Memory/multimedia and automatic pre-compaction helper dispatch are deferred, not new implementation authority.
 - **MCP versus extensions:** extensions integrate with Pi lifecycle and UI; MCP connects compatible clients to services and tools. They can be combined. Engram is a memory system, not merely a transport protocol.
 - **Memory:** Engram helped build this context, but its availability in the new session is not assumed. The architecture, persistence policy, and backend integration for StelaShell remain to be developed; any project-local continuity already in the code is a separate capability.
 - **Runtime controls:** instruction text, UI labels, executable guards, and provider-owned consent are different mechanisms. Do not claim that the FARO Markdown enforces permissions. If reusing a managed review integration later, preserve its contracts and consent rather than editing mirrors or hashes to bypass it.
@@ -275,7 +281,7 @@ One source-level compatibility question remains: the upstream prompt helper disc
 | Base | Conceptual definition completed: Pi host, isolated profile, source/runtime separation. |
 | Method and orchestration | FARO and project-continuity v1 exist and are documented as accepted and published; user reports the first version configured. Observe specific open runtime questions only when relevant, without reopening completed publication. |
 | Subagents | Own read-only, outcome-oriented core with a five-child ceiling, execution budgets and partial evidence. Oversized-blank final handling and POSIX owner-death supervision are corrected locally; deterministic Linux validation is separate from the recorded Windows activation and live observations. |
-| Tools | User-authorized old web retirement is complete. One internal extension based on pi-web-access, distributed with StelaShell, is selected—not an independent package. See [proposal](WEB_DOCUMENTATION_PLAN.md); the [old scaffold](../packages/web/README.md) is inactive. No new runtime/dependencies/loading route yet; root library installation and implementation remain pending. Existing FARO/subagent/session regressions pass after removal. Multimedia remains later and separately scoped. |
+| Tools | Owned integrated web search/read is implemented with root dependencies and deterministic/native Pi evidence: [operation and limitations](../extensions/web/README.md), [approved design](WEB_DOCUMENTATION_PLAN.md). No independent web package was added. The user's subsequent link request is fulfilled by the single Linux ss-web development link, without settings edits or agent-triggered reload. One subsequent user-requested peer live Exa→MDN smoke is complete, with search partial for snippet clipping and read ok; limits/evidence are in WORK_STATE. Independent web-control review is incomplete after timeout; do not retry automatically. The prior POSIX session-send repair and native source remain preserved. Multimedia remains later and separately scoped. |
 | Memory | Requirements and integration remain pending beyond any current project-local continuity mechanism. |
 | Integrations | Pending selection and implementation. |
 | Controls | Pending design and implementation; do not confuse prompt guidance with runtime enforcement. |

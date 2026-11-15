@@ -92,7 +92,7 @@ export function resolveLaunch(argv = process.argv, execPath = process.execPath):
   const resourceArgs: string[] = [];
   const retainedValues = new Set(["-e", "--extension", "--system-prompt", "--append-system-prompt", "--skill", "--prompt-template", "--theme"]);
   const retainedFlags = new Set(["-ne", "--no-extensions", "-ns", "--no-skills", "-np", "--no-prompt-templates", "--no-themes", "-nc", "--no-context-files", "--no-mcp"]);
-  const skippedValues = new Set(["--mode", "--provider", "--model", "--thinking", "--models", "--session", "--session-id", "--session-dir", "--fork", "-n", "--name", "-t", "--tools", "-xt", "--exclude-tools", "--tui-mode", "--use-theme", "--stela-subagent-concurrency"]);
+  const skippedValues = new Set(["--mode", "--provider", "--model", "--thinking", "--models", "--session", "--session-id", "--session-dir", "--fork", "-n", "--name", "-t", "--tools", "-xt", "--exclude-tools", "--tui-mode", "--use-theme", "--ss-tasks-concurrency"]);
   const skippedFlags = new Set(["-p", "--print", "-c", "--continue", "-r", "--resume", "--no-session", "-nt", "--no-tools", "-nbt", "--no-builtin-tools", "-a", "--approve", "-na", "--no-approve", "--offline", "--verbose"]);
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];

@@ -69,6 +69,23 @@ test("observation correlates admission, public work and unique delivery without 
   assert.deepEqual(duplicate.repeatedResults, ["one"]);
 });
 
+test("observation understands ss task names without rewriting legacy event identity", () => {
+  for (const [delegate, cancel] of [["ss_tasks_delegate", "ss_tasks_cancel"], ["stela_delegate", "stela_cancel"]]) {
+    const events = [
+      { seq: 1, type: "tool_execution_start", toolCallId: "d", toolName: delegate, args: { objective: "Evidence" } },
+      { seq: 2, type: "tool_execution_end", toolCallId: "d", toolName: delegate, result: { details: { taskId: "one" } } },
+      { seq: 3, type: "tool_execution_start", toolCallId: "c", toolName: cancel, args: { task_id: "other" } },
+      { seq: 4, type: "tool_execution_start", toolCallId: "r", toolName: "read", args: { path: "source" } },
+      { seq: 5, type: "entry_appended", entry: { customType: "stela-subagent-result", content: "Evidence", details: { taskId: "one" } } },
+    ];
+    const original = structuredClone(events);
+    assert.equal(summarize(events).uniqueTasks, 1);
+    assert.deepEqual(summarize(events).principalWorkBeforeDelivery.map((item: any) => item.seq), [4]);
+    assert.equal(publicEvent(events[0]).toolName, delegate);
+    assert.deepEqual(events, original);
+  }
+});
+
 test("synthetic workspaces are identical, mutation-detectable and contain no private oracle", () => {
   const root = mkdtempSync(join(tmpdir(), "stela-observation-fixture-"));
   try {

@@ -77,7 +77,7 @@ test("FARO verification and delegation instructions reach the parent tool and bo
   assert.equal(injected.systemPrompt, `${base}\n\n${method}`);
   assert.equal(event.systemPrompt, base);
   assert.match(injected.systemPrompt, /without waiting for the user to request subagents/);
-  assert.match(injected.systemPrompt, /When `stela_delegate` is available/);
+  assert.match(injected.systemPrompt, /When `ss_tasks_delegate` is available/);
 
   const verification = injected.systemPrompt.split("## 4. Verify at meaningful boundaries")[1].split("## 5.")[0];
   assert.match(verification, /When a numeric comparison materially supports a conclusion/);
@@ -85,7 +85,7 @@ test("FARO verification and delegation instructions reach the parent tool and bo
   assert.match(verification, /preserving units and rounding rules/);
   assert.match(verification, /unavailable or outside the authorized scope, state the limitation rather than claiming verification/);
 
-  const delegate = h.tools.get("stela_delegate");
+  const delegate = h.tools.get("ss_tasks_delegate");
   assert.equal(delegate.exposure, "model-only");
   const guidelines = delegate.promptGuidelines.join("\n");
   assert.match(guidelines, /Follow FARO's proportional delegation policy/);
@@ -94,7 +94,7 @@ test("FARO verification and delegation instructions reach the parent tool and bo
   assert.match(injected.systemPrompt, /not into a child per file or a fixed workflow/);
   assert.match(guidelines, /Select timeout_seconds before launch/);
   assert.match(guidelines, /never expands access or the helper's capabilities/);
-  assert.match(guidelines, /For stela_delegate, when the needed files are already known.*active readers cannot enumerate directories.*explicit file paths rather than only directory references/);
+  assert.match(guidelines, /For ss_tasks_delegate, when the needed files are already known.*active readers cannot enumerate directories.*explicit file paths rather than only directory references/);
   assert.match(guidelines, /for example, read alone/);
   assert.match(guidelines, /Do not enable readers or broaden the scope to compensate/);
 
@@ -123,7 +123,7 @@ test("execution budget defaults to 120 seconds and rejects values outside 120–
   const h = harness(); let launched = 0;
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: async () => { launched++; return success; } });
   await h.emit("session_start");
-  const tool = h.tools.get("stela_delegate");
+  const tool = h.tools.get("ss_tasks_delegate");
   assert.deepEqual(tool.parameters.properties.timeout_seconds, {
     type: "integer", minimum: 120, maximum: 300, default: 120,
     description: tool.parameters.properties.timeout_seconds.description,
@@ -140,7 +140,7 @@ test("admission propagates budgets and an active duplicate cannot extend or rest
   const h = harness(); const job = deferred<RunResult>(); const captured: RunOptions[] = [];
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => { captured.push(opts); return job.promise; } });
   await h.emit("session_start");
-  const tool = h.tools.get("stela_delegate");
+  const tool = h.tools.get("ss_tasks_delegate");
   const first = await tool.execute("first", assignment, undefined, undefined, h.ctx);
   const duplicate = await tool.execute("duplicate", { ...assignment, timeout_seconds: 300 }, undefined, undefined, h.ctx);
   assert.equal(duplicate.details.taskId, first.details.taskId);
@@ -153,7 +153,7 @@ test("admission propagates budgets and an active duplicate cannot extend or rest
   await tick(); // Admission returns before the new execution microtask runs.
   assert.deepEqual(captured.map((opts) => opts.assignment.timeout_seconds), [120, 300]);
   assert.deepEqual(captured[1].scope.tools, ["read", "grep", "find", "ls"]);
-  await h.commands.get("stela-tasks").handler(extended.details.taskId, h.ctx);
+  await h.commands.get("ss-tasks").handler(extended.details.taskId, h.ctx);
   assert.match(h.notifications[0], /Execution budget: 300 seconds/);
   job.resolve(success);
   await h.emit("agent_before_settle", { entries: [], outcome: "completed" });
@@ -409,10 +409,10 @@ for (const action of ["timeout", "cancel"]) {
       return runChild({ ...opts, launch: { command: process.execPath, prefix: [fixture, action === "timeout" ? "partial-ignore-term" : "stream-hang"], resourceArgs: [] }, timeoutMs: action === "timeout" ? 1500 : 5000, killGraceMs: 50 });
     } });
     await h.emit("session_start");
-    const receipt = await h.tools.get("stela_delegate").execute("partial", assignment, undefined, undefined, h.ctx);
+    const receipt = await h.tools.get("ss_tasks_delegate").execute("partial", assignment, undefined, undefined, h.ctx);
     if (action === "cancel") {
       await delay(800);
-      await h.tools.get("stela_cancel").execute("cancel", { task_id: receipt.details.taskId }, undefined, undefined, h.ctx);
+      await h.tools.get("ss_tasks_cancel").execute("cancel", { task_id: receipt.details.taskId }, undefined, undefined, h.ctx);
     }
     const boundary = await h.emit("agent_before_settle", { entries: [], outcome: "completed" });
     assert.equal(boundary.entries.length, 1);
@@ -422,7 +422,7 @@ for (const action of ["timeout", "cancel"]) {
     assert.match(boundary.entries[0].content, action === "timeout" ? /Partial evidence B: ñ🙂/ : /Stream corrected ñ🙂/);
     assert.doesNotMatch(boundary.entries[0].content, /PRIVATE_/);
     assert.equal(boundary.entries[0].details.result, undefined);
-    await h.commands.get("stela-tasks").handler(receipt.details.taskId, h.ctx);
+    await h.commands.get("ss-tasks").handler(receipt.details.taskId, h.ctx);
     assert.match(h.notifications[0], /Partial evidence only/);
     if (action === "timeout") assert.match(h.notifications[0], /read \/fixture\/source\.ts offset=1 limit=200/);
     assert.equal(await h.emit("turn_end", { entries: [], outcome: "completed" }), undefined);
@@ -482,10 +482,10 @@ test("extension returns immediately, allows five children and emits each result 
   let launched = 0;
   const captured: RunOptions[] = [];
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => { captured.push(opts); return jobs[launched++].promise; } });
-  assert.equal(h.flags.get("stela-subagent-concurrency"), "5");
+  assert.equal(h.flags.get("ss-tasks-concurrency"), "5");
   await h.emit("session_start");
   const receipts = [];
-  for (let i = 0; i < 6; i++) receipts.push(await h.tools.get("stela_delegate").execute("call", { ...assignment, objective: `Question ${i}` }, undefined, undefined, h.ctx));
+  for (let i = 0; i < 6; i++) receipts.push(await h.tools.get("ss_tasks_delegate").execute("call", { ...assignment, objective: `Question ${i}` }, undefined, undefined, h.ctx));
   assert.equal(launched, 5);
   assert.equal(receipts[5].details.state, "queued");
   const rows = h.widgets.at(-1)[1] as string[];
@@ -512,7 +512,7 @@ test("settlement waits on completion events, not provider polling", async () => 
   const h = harness(); const job = deferred<RunResult>();
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: () => job.promise });
   await h.emit("session_start");
-  await h.tools.get("stela_delegate").execute("call", assignment, undefined, undefined, h.ctx);
+  await h.tools.get("ss_tasks_delegate").execute("call", assignment, undefined, undefined, h.ctx);
   let returned = false;
   const boundary = h.emit("agent_before_settle", { entries: [], outcome: "completed" }).then((result) => { returned = true; return result; });
   await tick(); assert.equal(returned, false);
@@ -525,12 +525,12 @@ test("mutation warnings and human-only details do not duplicate model context", 
   const h = harness(); const job = deferred<RunResult>();
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: () => job.promise });
   await h.emit("session_start");
-  const receipt = await h.tools.get("stela_delegate").execute("call", assignment, undefined, undefined, h.ctx);
+  const receipt = await h.tools.get("ss_tasks_delegate").execute("call", assignment, undefined, undefined, h.ctx);
   await h.emit("tool_execution_end", { toolName: "edit", isError: false });
   job.resolve(success); await tick();
   const boundary = await h.emit("turn_end", { entries: [], outcome: "completed" });
   assert.match(boundary.entries[0].content, /potentially mutating/);
-  await h.commands.get("stela-tasks").handler(receipt.details.taskId, h.ctx);
+  await h.commands.get("ss-tasks").handler(receipt.details.taskId, h.ctx);
   assert.match(h.notifications[0], /read source.ts/);
   assert.equal(await h.emit("turn_end", { entries: [], outcome: "completed" }), undefined);
   await h.emit("session_shutdown");
@@ -541,7 +541,7 @@ for (const event of ["session_shutdown", "session_tree", "agent_settled"]) {
     const h = harness(); let aborted = false;
     registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => new Promise((resolve) => opts.signal.addEventListener("abort", () => { aborted = true; resolve({ ...success, status: "cancelled" }); }, { once: true })) });
     await h.emit("session_start");
-    await h.tools.get("stela_delegate").execute("call", assignment, undefined, undefined, h.ctx);
+    await h.tools.get("ss_tasks_delegate").execute("call", assignment, undefined, undefined, h.ctx);
     await tick();
     await h.emit(event, { aborted: true });
     assert.equal(aborted, true);
@@ -556,14 +556,14 @@ test("cancel tool rejects foreign IDs, cancels only its task and does not admit 
   const h = harness(); const jobs: Array<{ opts: RunOptions; resolve: (result: RunResult) => void }> = [];
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => new Promise((resolve) => { jobs.push({ opts, resolve }); opts.signal.addEventListener("abort", () => resolve({ ...success, status: "cancelled" })); }) });
   await h.emit("session_start"); h.pi.setActiveTools(["read"]);
-  const receipt = await h.tools.get("stela_delegate").execute("call", assignment, undefined, undefined, h.ctx);
+  const receipt = await h.tools.get("ss_tasks_delegate").execute("call", assignment, undefined, undefined, h.ctx);
   await tick();
   assert.deepEqual(jobs[0].opts.scope.tools, ["read"]);
-  await assert.rejects(h.tools.get("stela_cancel").execute("cancel", { task_id: "foreign" }, undefined, undefined, h.ctx), /Unknown/);
-  const cancelled = await h.tools.get("stela_cancel").execute("cancel", { task_id: receipt.details.taskId }, undefined, undefined, h.ctx);
+  await assert.rejects(h.tools.get("ss_tasks_cancel").execute("cancel", { task_id: "foreign" }, undefined, undefined, h.ctx), /Unknown/);
+  const cancelled = await h.tools.get("ss_tasks_cancel").execute("cancel", { task_id: receipt.details.taskId }, undefined, undefined, h.ctx);
   assert.equal(cancelled.details.requested, true);
   h.pi.setActiveTools(["bash"]);
-  await assert.rejects(h.tools.get("stela_delegate").execute("call", assignment, undefined, undefined, h.ctx), /No supported/);
+  await assert.rejects(h.tools.get("ss_tasks_delegate").execute("call", assignment, undefined, undefined, h.ctx), /No supported/);
   await h.emit("session_shutdown");
 });
 
@@ -576,7 +576,7 @@ test("child guard registers no delegator, enables only proven readers and blocks
   await h.emit("before_agent_start");
   assert.equal(h.entries[0].customType, READY_ENTRY);
   assert.equal(await h.emit("tool_call", { toolName: "read", input: { path: fixture } }), undefined);
-  for (const event of [{ toolName: "write", input: { path: fixture } }, { toolName: "bash", input: { command: "true" } }, { toolName: "read", input: { path: "/etc/passwd" } }, { toolName: "stela_delegate", input: {} }]) {
+  for (const event of [{ toolName: "write", input: { path: fixture } }, { toolName: "bash", input: { command: "true" } }, { toolName: "read", input: { path: "/etc/passwd" } }, { toolName: "ss_tasks_delegate", input: {} }]) {
     assert.equal((await h.emit("tool_call", event)).block, true);
   }
   assert.ok(h.entries.some((entry) => entry.customType === BLOCKED_ENTRY));
@@ -599,7 +599,7 @@ test("uncommitted boundary proposals remain eligible for delivery", async () => 
   const h = harness();
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: async () => success });
   await h.emit("session_start");
-  await h.tools.get("stela_delegate").execute("call", assignment, undefined, undefined, h.ctx);
+  await h.tools.get("ss_tasks_delegate").execute("call", assignment, undefined, undefined, h.ctx);
   await tick();
   const proposed = await h.hooks.get("turn_end")![0]({ entries: [], outcome: "completed" }, h.ctx);
   assert.equal(proposed.entries.length, 1);
@@ -616,7 +616,7 @@ test("parent interruption aborts a waiting settlement without a forced continuat
   const h = harness();
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: (opts) => new Promise((resolve) => opts.signal.addEventListener("abort", () => resolve({ ...success, status: "cancelled" }))) });
   await h.emit("session_start");
-  await h.tools.get("stela_delegate").execute("call", assignment, h.controller.signal, undefined, h.ctx);
+  await h.tools.get("ss_tasks_delegate").execute("call", assignment, h.controller.signal, undefined, h.ctx);
   await tick();
   const boundary = h.emit("agent_before_settle", { entries: [], outcome: "completed" });
   h.controller.abort();
@@ -628,10 +628,10 @@ test("parent interruption aborts a waiting settlement without a forced continuat
 test("queued work rechecks reader availability before launching", async () => {
   const h = harness(); const first = deferred<RunResult>(); let launches = 0;
   registerSubagents(h.pi, { env: {}, launch: fakeLaunch, run: () => { launches++; return first.promise; } });
-  h.flags.set("stela-subagent-concurrency", "1");
+  h.flags.set("ss-tasks-concurrency", "1");
   await h.emit("session_start");
-  await h.tools.get("stela_delegate").execute("one", assignment, undefined, undefined, h.ctx);
-  await h.tools.get("stela_delegate").execute("two", { ...assignment, objective: "Another question" }, undefined, undefined, h.ctx);
+  await h.tools.get("ss_tasks_delegate").execute("one", assignment, undefined, undefined, h.ctx);
+  await h.tools.get("ss_tasks_delegate").execute("two", { ...assignment, objective: "Another question" }, undefined, undefined, h.ctx);
   await tick(); h.pi.setActiveTools([]); first.resolve(success); await tick();
   const result = await h.emit("agent_before_settle", { entries: [], outcome: "completed" });
   assert.equal(launches, 1);
