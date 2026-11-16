@@ -9,9 +9,13 @@ export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 export const DEFAULT_WORK_SECONDS = 1800, MIN_WORK_SECONDS = 600, MAX_WORK_SECONDS = 3600;
 export const SESSION_CODES = ["CONVERSATION_EXPIRED", "WORK_EXPIRED", "REPLY_TARGET_NOT_RETAINED", "MESSAGE_EXPIRED", "INVALID_LIFETIME", "HOP_LIMIT", "SEND_BUDGET", "RECEIVE_BUDGET", "STATE_FULL", "UNSUPPORTED_WORK_CONTEXT", "DELIVERY_UNCONFIRMED", "INVALID_WORK_CONTEXT", "CONTEXT_MISMATCH", "MESSAGE_CONFLICT"] as const;
 export type SessionCode = typeof SESSION_CODES[number];
+export interface SendContext { selection: "reply_to" | "implicit" | "root"; thread: string; hop: number; expiresAt: number; work?: WorkContext }
 export class SessionError extends Error {
   readonly code: SessionCode;
-  constructor(code: SessionCode, message: string) { super(`${code}: ${message}`); this.name = "SessionError"; this.code = code; }
+  readonly context?: SendContext;
+  constructor(code: SessionCode, message: string, context?: SendContext) {
+    super(`${code}: ${message}`); this.name = "SessionError"; this.code = code; this.context = context;
+  }
 }
 export interface WorkContext { version: 1; id: string; startedAt: number; deadline: number }
 export interface WorkOptions { timeout_seconds?: number }
@@ -34,7 +38,12 @@ export interface Envelope {
 }
 export interface PeerInfo { id: string; sessionId: string; name: string; cwd: string }
 export interface Received { from: PeerInfo; message: Envelope; state: "accepted" | "delivered" | "expired" }
+type Lineage = Pick<Envelope, "thread" | "hop" | "expiresAt" | "work">;
+type Thread = Lineage & { retained: number };
 type History = { direction: "in" | "out"; peer: string; message: Envelope };
+export function sendContext(message: Lineage, selection: SendContext["selection"]): SendContext {
+  return { selection, thread: message.thread, hop: message.hop, expiresAt: message.expiresAt, ...(message.work ? { work: { ...message.work } } : {}) };
+}
 
 export function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected an object.");
@@ -83,8 +92,12 @@ export function workEnvelope(value: unknown, now = Date.now()): Envelope {
 export function validateMessage(value: unknown, now = Date.now()): Envelope {
   return object(value).work === undefined ? envelope(value, now) : workEnvelope(value, now);
 }
-export function sameContext(a: Envelope, b: Envelope): boolean {
-  return a.thread === b.thread && JSON.stringify(a.work) === JSON.stringify(b.work);
+export function sameContext(a: Lineage, b: Lineage): boolean {
+  return a.thread === b.thread && (a.work === undefined ? b.work === undefined : b.work !== undefined &&
+    a.work.version === b.work.version && a.work.id === b.work.id && a.work.startedAt === b.work.startedAt && a.work.deadline === b.work.deadline);
+}
+function sameMessage(a: Envelope, b: Envelope): boolean {
+  return a.id === b.id && sameContext(a, b) && a.hop === b.hop && a.expiresAt === b.expiresAt && a.replyTo === b.replyTo && a.text === b.text;
 }
 
 /** Escape terminal controls and bidi/format characters, including in untrusted metadata. */
@@ -106,97 +119,135 @@ export function formatMessage(received: Received): string {
   ].join("\n\n");
 }
 
-/** Memory-only admission and lineage. Human input, never peer/extension input, resets budgets. */
+/** Memory-only admission. Explicit correlation is per thread; implicit work stays sticky. */
 export class Mailbox {
   private readonly history = new Map<string, History>();
+  // At most one text-free index entry per retained thread (<=64), never per peer.
+  private readonly threads = new Map<string, Thread>();
   private readonly inbox: Received[] = [];
-  private active?: Envelope;
+  private implicit?: Thread; // May retain ONE expired boundary, not its message body.
+  private offered?: { id: string; thread: Thread }; // ONE text-free proposal, never a delivery claim.
+  private nextExpiry = Infinity;
   private canStartWork = false;
   private received = 0;
   private sent = 0;
   private readonly now: () => number;
   constructor(now: () => number = Date.now) { this.now = now; }
 
-  humanInput(): void { this.received = 0; this.sent = 0; this.active = undefined; this.canStartWork = true; }
-  private prune(): void {
-    const now = this.now();
-    // The existing 64-entry history is also the work correlation/deduplication bound.
-    for (const [id, item] of this.history) if ((item.message.work?.deadline ?? item.message.expiresAt) <= now) this.history.delete(id);
-    for (let i = this.inbox.length - 1; i >= 0; i--) {
-      if (this.inbox[i].message.expiresAt <= now) { this.inbox[i].state = "expired"; this.inbox.splice(i, 1); }
+  humanInput(): void { this.received = 0; this.sent = 0; this.implicit = undefined; this.canStartWork = true; }
+  private prune(now = this.now()): void {
+    if (now < this.nextExpiry) return;
+    this.nextExpiry = Infinity;
+    for (const [id, item] of this.history) {
+      const expiry = item.message.work?.deadline ?? item.message.expiresAt;
+      if (expiry <= now) {
+        this.history.delete(id);
+        const thread = this.threads.get(item.message.thread)!;
+        if (--thread.retained === 0) this.threads.delete(thread.thread);
+      } else this.nextExpiry = Math.min(this.nextExpiry, expiry);
     }
-    // Never clear active on expiry: that would permit a new automatic root.
+    for (let i = this.inbox.length - 1; i >= 0; i--) {
+      const item = this.inbox[i];
+      if (item.message.expiresAt <= now) { item.state = "expired"; this.inbox.splice(i, 1); }
+      else this.nextExpiry = Math.min(this.nextExpiry, item.message.expiresAt);
+    }
+    // Expiry never clears implicit lineage into a fresh automatic root.
   }
-  private highestHop(thread: string): number {
-    let hop = -1;
-    for (const item of this.history.values()) if (item.message.thread === thread) hop = Math.max(hop, item.message.hop);
-    return hop;
+  private retain(direction: History["direction"], peer: string, message: Envelope): Thread {
+    let thread = this.threads.get(message.thread);
+    if (!thread) {
+      thread = { thread: message.thread, hop: message.hop, expiresAt: message.expiresAt, retained: 0,
+        ...(message.work ? { work: { ...message.work } } : {}) };
+      this.threads.set(message.thread, thread);
+    }
+    thread.hop = Math.max(thread.hop, message.hop);
+    thread.expiresAt = Math.min(thread.expiresAt, message.expiresAt);
+    thread.retained++;
+    this.history.set(message.id, { direction, peer, message });
+    this.nextExpiry = Math.min(this.nextExpiry, message.work?.deadline ?? message.expiresAt);
+    return thread;
   }
   accept(from: PeerInfo, raw: unknown): "accepted" | "duplicate" {
-    const message = validateMessage(raw, this.now());
-    this.prune();
+    const now = this.now(), message = validateMessage(raw, now);
+    this.prune(now);
     const known = this.history.get(message.id);
     if (known) {
-      if (known.direction === "in" && known.peer === from.id && JSON.stringify(known.message) === JSON.stringify(message)) return "duplicate";
+      if (known.direction === "in" && known.peer === from.id && sameMessage(known.message, message)) return "duplicate";
       throw new SessionError("MESSAGE_CONFLICT", "Message ID conflict.");
     }
+    if (this.offered?.id === message.id) throw new SessionError("MESSAGE_CONFLICT", "Message ID belongs to an outstanding proposal.");
     if (this.received >= MAX_AUTOMATIC_MESSAGES) throw new SessionError("RECEIVE_BUDGET", "Automatic receive budget reached; human input is required to reset it.");
     if (this.inbox.length >= MAX_INBOX || this.history.size >= MAX_HISTORY) throw new SessionError("STATE_FULL", "Session inbox/history is full.");
-    for (const item of this.history.values()) {
-      if (item.message.thread === message.thread && !sameContext(item.message, message)) throw new SessionError("CONTEXT_MISMATCH", "Conflicting conversation/work metadata.");
+    const thread = this.threads.get(message.thread) ?? (this.implicit?.thread === message.thread ? this.implicit : undefined) ??
+      (this.offered?.thread.thread === message.thread ? this.offered.thread : undefined);
+    if (thread && (!sameContext(thread, message) || (!message.work && message.expiresAt > thread.expiresAt))) {
+      throw new SessionError("CONTEXT_MISMATCH", "Conflicting conversation/work metadata or extended ordinary deadline.");
     }
-    if (this.active?.thread === message.thread && !sameContext(this.active, message)) throw new SessionError("CONTEXT_MISMATCH", "Conflicting active work metadata.");
     if (message.replyTo) {
       const original = this.history.get(message.replyTo);
       if (!original || original.direction !== "out" || original.peer !== from.id || !sameContext(original.message, message) || message.hop <= original.message.hop || (!message.work && message.expiresAt > original.message.expiresAt)) throw new SessionError("CONTEXT_MISMATCH", "Reply does not match a retained outbound message.");
     }
-    // Correlated branches may arrive out of order; their own anchor enforces hop growth.
-    // The active/send high-water mark still cannot decrease when such a result commits.
-    if (message.work && !message.replyTo && message.hop <= this.highestHop(message.thread)) throw new SessionError("HOP_LIMIT", "Uncorrelated work message does not advance the retained causal hop.");
+    // Delayed branches grow from their own anchor, without lowering the indexed send high-water.
+    if (message.work && !message.replyTo && message.hop <= (thread?.hop ?? -1)) throw new SessionError("HOP_LIMIT", "Uncorrelated work message does not advance the retained causal hop.");
     this.received++;
-    this.history.set(message.id, { direction: "in", peer: from.id, message });
+    this.retain("in", from.id, message);
     this.inbox.push({ from: { ...from }, message, state: "accepted" });
+    this.nextExpiry = Math.min(this.nextExpiry, message.expiresAt);
     return "accepted";
   }
   prepare(to: string, text: unknown, replyTo?: string, options?: WorkOptions): Envelope {
-    identifier(to); messageText(text); this.prune();
-    const now = this.now();
+    identifier(to); const body = messageText(text), now = this.now(); this.prune(now);
     if (this.sent >= MAX_AUTOMATIC_MESSAGES) throw new SessionError("SEND_BUDGET", "Send budget reached; no message was sent.");
     if (this.history.size >= MAX_HISTORY) throw new SessionError("STATE_FULL", "Send/history budget reached; no message was sent.");
-    if (this.active && (this.active.work?.deadline ?? this.active.expiresAt) <= now) throw new SessionError(this.active.work ? "WORK_EXPIRED" : "CONVERSATION_EXPIRED", "Automatic context expired; do not retry or restart it automatically.");
-    let base = this.active;
+    let base: Lineage | undefined = this.implicit;
     if (replyTo !== undefined) {
       const original = this.history.get(identifier(replyTo));
-      if (!original || original.direction !== "in" || original.peer !== to) throw new SessionError("REPLY_TARGET_NOT_RETAINED", "Reply target is not a retained message from that activation.");
+      if (!original || original.direction !== "in" || original.peer !== to) throw new SessionError("REPLY_TARGET_NOT_RETAINED", "Reply target is not a retained message from that activation; no implicit fallback.");
       base = original.message;
     }
-    if (this.active && base && (this.active.work || base.work) && !sameContext(this.active, base)) throw new SessionError("CONTEXT_MISMATCH", "Reply cannot replace, upgrade or downgrade the active work context.");
-    let work = base?.work;
+    const selection = replyTo !== undefined ? "reply_to" : base ? "implicit" : "root";
+    const thread = base ? this.threads.get(base.thread) : undefined;
+    const selected = base ? { ...base, hop: Math.max(base.hop, thread?.hop ?? -1), expiresAt: Math.min(base.expiresAt, thread?.expiresAt ?? Infinity) } : undefined;
+    const context = selected ? sendContext(selected, selection) : undefined;
+    // Check ONLY the selected lineage. An unrelated expired implicit boundary cannot veto an exact reply.
+    if (selected && (selected.work?.deadline ?? selected.expiresAt) <= now) throw new SessionError(selected.work ? "WORK_EXPIRED" : "CONVERSATION_EXPIRED", "Selected automatic context expired; do not retry or restart it automatically.", context);
+    let work = selected?.work;
     if (options !== undefined) {
       const seconds = workSeconds(options);
-      if (!this.canStartWork || base || replyTo !== undefined) throw new SessionError("INVALID_WORK_CONTEXT", "Work must be selected at a fresh human-originated root; it cannot upgrade or renew automatic context.");
+      if (!this.canStartWork || selected || replyTo !== undefined) throw new SessionError("INVALID_WORK_CONTEXT", "Work must be selected at a fresh human-originated root; it cannot upgrade or renew automatic context.", context);
       work = { version: 1, id: newId(), startedAt: now, deadline: now + seconds * 1000 };
     }
-    const raw = { id: newId(), thread: work?.id ?? base?.thread ?? newId(),
-      hop: base ? Math.max(base.hop, this.active?.hop ?? 0, work ? this.highestHop(work.id) : -1) + 1 : 0,
-      expiresAt: work ? Math.min(now + MESSAGE_TTL_MS, work.deadline) : Math.min(base?.expiresAt ?? now + MESSAGE_TTL_MS, this.active?.expiresAt ?? Infinity),
-      text, ...(replyTo ? { replyTo } : {}), ...(work ? { work } : {}) };
-    const message = validateMessage(raw, now);
+    const hop = selected ? selected.hop + 1 : 0;
+    if (hop >= MAX_HOPS) throw new SessionError("HOP_LIMIT", "Selected conversation hop limit reached.", context);
+    // These fields are host-built from validated metadata; do not reparse/byte-count the body twice.
+    const message: Envelope = { id: newId(), thread: work?.id ?? selected?.thread ?? newId(), hop,
+      expiresAt: work ? Math.min(now + MESSAGE_TTL_MS, work.deadline) : selected?.expiresAt ?? now + MESSAGE_TTL_MS,
+      text: body, ...(replyTo !== undefined ? { replyTo } : {}), ...(work ? { work: { ...work } } : {}) };
     this.sent++; this.canStartWork = false;
-    this.history.set(message.id, { direction: "out", peer: to, message });
-    if (work) this.active = message; // Reserve once before any asynchronous negotiation/I/O.
+    const retained = this.retain("out", to, message); // Reserve before asynchronous negotiation/I/O, even if it fails.
+    if (work && !this.implicit?.work) this.implicit = retained;
     return message;
   }
   next(): Received | undefined { this.prune(); return this.inbox[0]; }
+  offer(): Received | undefined {
+    this.prune();
+    if (this.offered) return undefined; // No overlapping/repeated proposal, including after its TTL.
+    const item = this.inbox[0];
+    if (item) this.offered = { id: item.message.id, thread: this.threads.get(item.message.thread)! };
+    return item;
+  }
+  withdraw(): void { this.offered = undefined; } // Explicit host cancellation, never expiry/renewal.
   delivered(id: string): boolean {
     this.prune();
+    if (this.offered && this.offered.id !== id) return false;
     const index = this.inbox.findIndex((item) => item.message.id === id);
-    if (index < 0) return false;
-    const [item] = this.inbox.splice(index, 1);
-    item.state = "delivered"; this.canStartWork = false;
-    // A queued older/unrelated entry cannot replace a fixed work boundary, even after expiry.
-    if (!this.active?.work) this.active = item.message;
-    else if (sameContext(this.active, item.message)) this.active = { ...item.message, hop: Math.max(this.active.hop, item.message.hop) };
+    const thread = this.offered?.thread ?? (index < 0 ? undefined : this.threads.get(this.inbox[index].message.thread));
+    if (!thread) return false;
+    if (index >= 0) this.inbox.splice(index, 1)[0].state = "delivered";
+    // The host proved this proposal actually committed. Pruned bodies/anchors stay pruned;
+    // only its original lineage survives, even if the entire thread expired in the meantime.
+    this.offered = undefined; this.canStartWork = false;
+    if (!this.implicit?.work) this.implicit = thread;
     return true;
   }
   get pending(): number { this.prune(); return this.inbox.length; }
