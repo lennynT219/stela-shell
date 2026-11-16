@@ -1,6 +1,16 @@
-# Brain project-memory contract — proposal
+# Brain project-memory contract
 
-Status: product vision, initial access boundary, shared project-collection ownership and revision-based logical updates are confirmed by the user. Concrete schema/API/storage details remain a design proposal, not an implementation or complete technical approval. No installation, service activation, data capture or connector implementation follows from this document.
+Status: Brain R1/R2/R3 CLOSED within reviewed scope on .N9bkmy/dd9da947... (98 logged tests, four matching-BIN oracles and parent8/8 byte-exact CLI replay). No code/result/helper pending; acceptance notice to Brain failed CONTEXT_MISMATCH, not delivered/retried. Core local/uncommitted, Cargo frozen, sole Brain source ownership. SS runtime/cutover/installer/live activation and Brain-repository Git remain separate proposals. The user separately authorized committing/pushing the completed StelaShell documentation; that does not publish Brain source or implement the SS adapter. Detail: [implementation plan](BRAIN_MEMORY_IMPLEMENTATION_PLAN.md).
+
+## Confirmed folder-first Memory direction
+
+The user confirmed a fourth domain model, user-facing Memoria: a persistent work context, not each message or individual remembered fact. A Project can group multiple Memories; each Memory may have zero or one Project. SS must not require creating a Project merely to preserve context for a working folder. A Memory has stable identity independent of the path used to locate it, and moving the folder must not lose its related memory/history.
+
+The user accepted .brain.toml inside the associated folder, traveling with it on moves, using TOML binding_version=1 and memory_id. The marker contains no memory/history, vault paths, permissions or optional Project association; those remain in Brain/trusted host state. This is not authorization to create files/config or implement code; explicit reassociation can be recovery. The user chose copied folders/other locations to share the SAME Memory identity, not automatically fork a new one. Location is a locator/provenance, not private ownership; the identifier still never grants authority. Memory data stays in Brain; moving a working folder does not itself transfer/synchronize the Brain store.
+
+The user now defines independent subfolder Memories only under either condition: the child has its own .brain.toml OR the parent .brain.toml explicitly declares that child for Memory creation. No blanket Memory creation for every subdirectory. An existing child's identity must not be overwritten/duplicated merely because the parent lists it. The user accepted the optional memory_subfolders list of explicit relative paths and materializing each child's own marker when creating its Memory, preserving portable identity. The user approved checking for existing context at the first genuine user prompt and persisting new Memory at the end of the first useful completed turn, not on SS startup. Existing Memory is consulted before work; cancelled/failed/empty interactions create no new Memory. Later durable changes publish revisions of the same Memory rather than creating one per prompt. Concurrent creation must not duplicate identities; the coordination implementation is not designed/delivered. Listed children are not all created on the parent's first prompt. In the absence of a separate context, the proposed default is the enclosing authorized Memory, not a new one.
+
+These confirmed semantics now have a Brain core/schema/binding implementation; SS lifecycle/permissions/cutover remain future integration. Historical H1 required a supplied Project and is removed from the reported restored base. The earlier managed-Note recommendation and mandatory-Project prerequisite are superseded for future integration; revision safety, shared authorized context and personal/other-context access boundaries remain. No code, marker, migration or connector is authorized by this design discussion.
 
 ## Confirmed intent and access boundary
 
@@ -8,8 +18,8 @@ Brain is the user's general second brain: projects, personal notes and other kno
 
 The user wants durable project memories that can be created, found/read and edited/updated. Initial StelaShell policy:
 
-- Automatically manage the agent's own memories within the active project.
-- Require explicit user direction to access/modify personal notes or consult other projects.
+- Automatically manage the agent's own Memory within the confirmed active working context; a Project is optional. Exact folder identity and grant encoding remain to be designed.
+- Require explicit user direction to access/modify personal notes or consult other contexts/projects. Grouping Memories under one Project does not itself expand that authority.
 - Do not interpret this as permission to capture entire conversations, copy secrets, overwrite human edits or treat recalled text as instructions/authorization.
 
 A direction to read one personal note or another project's item is not permission to edit it, search the entire vault, follow all its source links or reclassify it as agent-owned.
@@ -17,37 +27,104 @@ A direction to read one personal note or another project's item is not permissio
 ## Responsibilities
 
 - **Brain:** durable knowledge, memory identity, storage, source attribution, scoped retrieval and safe memory changes.
-- **StelaShell:** trusted project binding, permission-aware tool integration, bounded context delivery and FARO/session/helper lifecycles.
-- **WORK_STATE.md:** the canonical compact operational snapshot; see [the current record](WORK_STATE.md). Historical memories do not silently replace current decisions or active task state.
+- **StelaShell:** trusted working-context-to-Memory binding, permission-aware tool integration, bounded context delivery and FARO/session/helper lifecycles.
+- **WORK_STATE.md:** currently the required canonical operational snapshot; see [the current record](WORK_STATE.md). The user confirmed replacing this separate operational file with Brain's current Memory stays pending until Brain and its integration are implemented, using the same five sections and avoiding two permanent sources of truth. Until then keep the actual file; history does not override current decisions and no deletion is authorized.
 - **Git, original sources and tests:** authoritative artifacts/evidence in their own domains; a memory is not a substitute for them.
 
 Do not expand the read-only helper role or add a second memory database merely to implement this connector.
 
 ## Domain model and trusted binding
 
-A managed Brain Note with a project-memory role is the recommended starting point, not a new top-level Memory type by default. In the inspected Brain baseline, Note has common metadata only; project linkage belongs to Task. Project/role/owner/memory fields on Note would be schema extensions requiring a deliberate compatibility decision.
+The user selected a distinct Memory domain model rather than requiring every work context to be a Project or treating all agent context as an ordinary Note. The delivered DocumentMetadata now includes Memory alongside the three existing types, with positive memory_revision and optional Project UUID/link pair. Parent inspected the additive model and CLI/library wiring; no source edits here. Existing Task-to-Project semantics are not changed by this decision.
 
 Before an automatic operation, trusted host state must bind:
 
 1. The explicitly selected vault.
-2. A verified existing Brain Project UUID.
+2. A stable Memory identity and its confirmed working-context association; resolve/validate a Project separately only when associated.
 3. The approved logical agent owner/collection.
 4. The allowed operations and their scope.
 
-The repository-to-project association must be confirmed. A global active-vault pointer, current directory, path, frontmatter marker or caller-selected UUID does not grant authorization. Missing or ambiguous binding fails closed. The model must not choose broader scope through ordinary tool arguments.
+The working-context-to-Memory association must be confirmed. A global active-vault pointer, current directory, path, frontmatter marker or caller-selected UUID does not grant authorization. Missing or ambiguous binding fails closed. The model must not choose broader scope through ordinary tool arguments.
 
-**Logical ownership is confirmed by the user:** one StelaShell-managed memory collection per project, shared across authorized sessions using the same confirmed binding. Session identity is provenance, not private ownership or the lifetime of the memory. A new session can reuse the collection without inheriting broader permissions. Concrete owner identifiers, schema encoding and binding configuration remain technical design choices; shared ownership does not grant access to personal notes or other projects.
+**Logical ownership:** Memory belongs to its stable work context, not a particular session; authorized sessions reuse the same confirmed binding. Project grouping is optional organization, not ownership transfer or broader permission. Historical H1 used one stela-shell collection per supplied Project and was removed; the new folder-first implementation now supports optional Project, not an H1 adaptation or permission expansion. Session identity remains provenance. Subfolder declaration/first-use trigger and shared-copy semantics are confirmed; grant validation and live-session coordination still need implementation; shared context grants no personal/other-context access.
+
+## Visible Markdown relationships
+
+The user confirmed relationships are represented by actual links in Markdown notes, enabling Obsidian's graph to show connections. UUID metadata is stable identity, not a substitute for a visible note link. Links/navigation are not permission grants or automatic formal Project reassignment.
+
+The user accepts the explained Obsidian-compatible wikilink convention, for example [[Memorias/<memory-uuid>/Memoria|Memoria]] and [[Memorias/<memory-uuid>/Historial|Historial]], with qualified paths distinguishing repeated short basenames. Brain now writes these relation strings, but active-link validation has R1; no actual Obsidian graph/runtime output or change to existing Task semantics is verified. Relationships must exist in the notes, not only internal IDs; do not re-ask the naming/identity/Project/link choices.
+
+A real Project document connects only when associated, outside Memorias; no forced Project or extra index Note. An unassociated Memory can link to its own history without inventing a central context node. Brain should keep link targets consistent with its managed operations; moving a working folder does not move the vault Memory. History/reference links can use existing body sections rather than adding a sixth operational section. No actual notes, links or Obsidian configuration are changed in this design phase.
+
+## Current context and history policy
+
+The user approved one logical Memory with two separate parts: current work context and retained revision history. One Memory is not an ever-growing file containing every previous state. The current context uses the same five sections as WORK_STATE: Objective and scope; Current decisions; Outcome status; Relevant evidence; Next actions and open questions. The intended future role is to replace the separate operational file after working integration/migration, not maintain two permanent canonical copies. Actual docs/WORK_STATE.md remains required/primary in the current workflow; no removal, migration or new code is authorized by this design discussion.
+
+The user declined proactive condensation and automatic history segmentation/archive/rotation for now, preferring observation of normal growth. The proposed8–16KiB current-content target is not adopted. Normal work updates affected state and publishes a revision only for meaningful durable changes; no artificial append-every-prompt log, extra cleanup pass or automatic historical deletion. The user confirmed Memorias/<memory-uuid>/{Memoria.md,Historial.md} and complete accepted-version Markdown snapshots in Historial.md, including the last accepted document bytes. History contains accepted states, not every prompt or draft. Lossless framing and safe publication/recovery still need technical design. Preserve observed manual edits and require human approval; do not impose H1's immutable view/base1 architecture as a user requirement.
+
+Growth observation is a future normal-use activity, not permission for synthetic volume generation, paid/live trials or extra instrumentation now. Historical H1 used128-revision/8MiB graph limits, but it is removed in the restored base; these are not selected limits for a replacement. Any future safety bound must surface a blocked save honestly, not discard history or promise indefinite capacity. Broader Markdown schema/integration and future retention/archive policy remain separate work.
+
+## Rejected representation and fresh consultation
+
+The user explicitly rejected result a0cebb2ee9e8e2c15aa7bcc13bcf52e5: canonical BMR history plus Memoria-rN.md projections/new store contract was not aligned with the intended Memory experience. Do not treat that layout, schema, immutable-current-view mechanism or H1 reuse as an approved design. Preserve only the confirmed current-context/separate-history/manual-approval semantics, not its physical implementation.
+
+The user replaced the Brain session and supplied activation1fc7ec5782d33521146aecc673e2237c. Fresh discovery verified its Brain workspace; new read-only consultationb463bd841ff96c853d9cae84f84b89b6 asks for actual restored-source findings and ONE minimal Markdown-native Memory model/layout/history proposal aligned with all confirmed decisions. No rollback/Git/source/test/build/dependency actions are authorized by that assignment; no old thread is renewed.
+
+Peer milestone587579e0a28ef552a2b488bc21bcd221 reports main@1e6c2aa91e1d38007779ac4deda319afec10fb34 (`restore standalone Brain base`), clean status twice, lib exporting only document and experimental memory module/tests/format absent. Note/Project/Task and init/config are preserved. This is peer-observed stable rollback evidence, not parent execution or proof against every external writer. No builds/tests/changes by the new consultation. Its final two-part proposal038b45f17f36293478b57b853e56a106/b11bd1395771656da3d7b6c58e1ad317 is now complete; source/manifest findings and remaining decisions are below, without new runtime verification.
+
+Favor a clear current Memory Markdown document consistent with Brain's domain; exact path/metadata/history publication remain proposals to evaluate, not a hidden decision to overwrite human edits or a guarantee of filesystem CAS. Re-evaluate parser/UUID/dependency needs against the restored base; no automatic H1 migration/version2 requirement or copied old numeric limits.
+
+## Confirmed Markdown layout; technical mechanics proposed
+
+The user accepted a normal readable/editable current Memory document and ONE separate Markdown history file, not a generated projection or BMR store. The earlier02-areas/99-sistema placement is superseded by the chosen Memorias area. UUID-only filenames remain rejected: readable Obsidian graph node names are a core product requirement. Keep UUID in frontmatter/marker/directory, decoupled from display filename. Optional Project is metadata/navigation, never required path/identity; moves/copies retain UUID and trusted configuration selects vault.
+
+The user approved a distinct Memorias area and short nonrepeated names, but explicitly rejected the proposed StelaShell.md/ordinary Note index and task index inside it. This area contains only Memories and history, not a substitute Project/context-index entity.
+
+The user now accepts UUIDs as directory names, not visible document filenames. Chosen convention:
+
+```text
+<selected-vault>/Memorias/<memory-uuid>/
+  Memoria.md      # current Memory, five agreed sections
+  Historial.md    # separate history
+```
+
+The directory UUID, working marker memory_id and Memory frontmatter brain_id identify the same Memory. UUID stays in the path/metadata, not the document basename/normal graph label. This directory is not a Project or graph node. Memory can exist unassociated indefinitely. Only when assigned to a real Project does that Project's own Markdown document (in the Project area, not Memorias) provide the central StelaShell node and links to related Memory/history/tasks. Reuse the actual Project model; do not fabricate an ordinary Note index, force Project creation, move the Memory or change its UUID merely to establish that association. Current Task-to-Project semantics are unchanged; no automatic task documents.
+
+Native Obsidian graph is notes+links, not folders. Before Project association, no central StelaShell note exists solely because the Memory folder has that name. The graph's placement is not a guaranteed tree. Qualified links and UUID identity disambiguate same short filenames across context folders; exact graph/navigation implementation remains untested and no settings are changed.
+
+PARA Areas represent ongoing responsibilities, not every arbitrary work context; the accepted distinct Memory area avoids forcing that category. System history placement was only a convention, never automatic graph exclusion. The user includes a history relation in the desired graph: do not silently exclude it. Any future graph filtering/setting change needs explicit design/verification; nothing in Obsidian is changed now.
+
+Resolve authorized memory_id directly to Memorias/<memory-uuid>/Memoria.md, then validate its brain_id against marker/directory identity. No filename scan, whole-vault personal-note read or added catalog is needed for this convention. Working-folder moves/copies still select the same Memory; optional Project association never relocates it. Short Memoria.md/Historial.md repeat safely in distinct UUID directories with qualified links. UUID path/metadata is a selector, not permission; no automatic overwrite or replacement identity if a resource is missing.
+
+Delivered frontmatter: brain_type=memory, brain_version=1, brain_id, title, positive-u64 memory_revision, optional paired brain_project/project_link. The fourth variant reuses CommonMetadata, preserving Note/Project/Task semantics. Body requires the five canonical sections; absent Project is omitted. Actual managed YAML bytes are preserved across normal body/revision updates; active-relation/canonical-H2 validation is now scoped verified by the accepted R1 evidence below, not a general renderer/Obsidian certification.
+
+Confirmed history content: retain every durable accepted full Markdown document version in ONE Historial.md, including the latest accepted snapshot. The user approved full versions, not lossy diffs, rejected drafts or prompt transcripts. Delivered Brain history framing preserves full accepted Markdown bytes, including fences/newline variants; SS consumes Brain-owned history rather than inventing a second format. This duplicates text and may grow faster than diffs, intentionally subject to normal-use observation; no pruning/condensation/archive/rotation target is proposed. Current is the working document, not automatically reconstructed from history.
+
+Before an update, compare expected revision AND exact accepted current bytes under a per-Memory cooperating-writer lock. Difference can mean manual edit OR partial publication; preserve current, notify SS/human and require approval/recovery. Missing/corrupt history is not a missing Memory or authority to adopt/overwrite; report unavailable baseline. Approval still requires fresh revision/base checks. Session communication agrees order, not storage authority; lock does not span the entire reasoning turn.
+
+Delivered publication stages an exact before/next .pending.json intent, publishes current then history with same-directory temporaries, publishes the creation marker without clobbering, verifies bytes, clears the creation receipt, and removes intent last before saved. Creation first reserves UUID/request in .brain.pending.toml. These are separate writes, NOT a transaction/CAS; incomplete intent/receipt is partial and never auto-adopted/rolled back. Pre-intent reservations may lack recoverable content; explicit human-directed reconciliation remains necessary. Parent's independent store review found no concrete destructive publication/recovery violation within scope, not universal proof.
+
+Delivered locks use standard File::try_lock, immediate busy/no waiting and short cooperating-writer critical sections; stable lock sidecars have no owner metadata and are not stolen by PID/age/session. Cargo declares Rust>=1.89, but observed execution is Linux/Rust1.100 only. No cross-platform/MSRV/power-loss certification follows.
+
+Current source findings: fourth Memory model, strict binding resolver, byte-preserving canonical Markdown/full-snapshot history, exact manual approval/recovery and brain memory JSON v1 are implemented locally. Initial72-test core exposed R1/R2/R3; all three are now CLOSED within the bounded reviews below. Final98-test packet preserves scoped R2/R3 and actual parent CLI/source evidence. Existing serde-saphyr/serde_json/uuid dependency approval is implementer-attributed; exact additional defaults-off pulldown-cmark/unicase setup was separately human-approved and independently prepared/verified HERE, no protected approval transfer. Brain core acceptance does NOT implement/enable SS lifecycle, installer or continuity migration.
+
+## Confirmed exceptional-case behavior
+
+- Manual changes: Memories primarily serve agents, but if a human edits one, notify the human in the SS session and require approval before accepting/importing the changed state. Never silently overwrite or discard edited bytes; Brain's exact accept_external primitive exists; SS's actual-human approval/permission UX remains unimplemented.
+- Missing referenced Memory: report the missing resource and offer creating a NEW Memory; do not silently regenerate the old ID/replace the marker or block ordinary SS use. Distinguish a confirmed missing record from unavailable storage/access/I/O errors.
+- Concurrent sessions: use authenticated session communication to agree who updates first. This is coordination, not a substitute for Brain locking/expected-revision checks. Discovering the live editing session and handling unavailable peers within existing bounded messaging remain implementation details; no unbounded waits, retry/renewal or fabricated ownership.
+- Optional Brain: the future installer offers Brain integration and, if accepted there, download/preparation. Declining keeps WORK_STATE.md as the operational mechanism. This product requirement is not current download/install/profile authorization. Runtime missing-memory errors must not block SS; do not silently create two canonical stores or auto-merge them.
 
 ## Proposed operations
 
-Exact command names, wire fields, schema versions and numeric limits are not selected yet. The following are domain semantics, not available commands.
+Future command names and wire fields are not selected. H1's removed API/format/limits are historical below, not prerequisites. Initial Memory lookup resolves the confirmed marker/UUID directly; broad lexical/vector/search features are not part of this first technical plan. The following are domain requirements, not available CLI commands or a delivered connector.
 
 | Operation | Required behavior |
 | --- | --- |
 | Create | Accept title/body, claim kind and provenance in the bound collection; allocate a stable memory UUID and content revision. An operation/request key should prevent duplicate creation after repeated delivery, without introducing automatic retries. |
-| Find | Start with lexical retrieval filtered to the bound project/owner. Return bounded snippets, IDs and sources, never an implicit whole-vault search or transcript dump. |
+| Find | Initially resolve the authorized working marker/UUID directly to its Memory; no catalog or whole-vault search. Broader lexical/Project-wide retrieval remains separate scope and requires its own authority. |
 | Read | Resolve a memory ID inside the authorized scope; return bounded content, revision, sources and an explicit truncation indicator. |
-| Update | Require memory ID, expected content revision and an explicit logical change. Preserve human material, unknown properties, sources and untouched content. The publication mechanism is pending the strategy decision below; do not change project/owner as a side effect. |
+| Update | Require memory ID, expected content revision and an explicit logical change. Preserve human material, unknown properties, sources and untouched content. Use the delivered expected-revision/accepted-byte and intent-based publication mechanism; do not change project/owner as a side effect. |
 
 No automatic deletion is requested. Supersession, where used, retains links to earlier claims and evidence rather than silently erasing history. No semantic/vector backend is necessary to establish the first useful workflow.
 
@@ -69,47 +146,55 @@ Attribution is not verification. Unknown evidence stays unknown; do not generate
 
 Candidate error categories: unbound/ambiguous, denied/out-of-scope, not found without unauthorized-existence leaks, unsupported schema, invalid input/provenance, revision conflict, needs review, and preservation/I/O failure. Exact serialization remains a proposal.
 
-## Safe updates are a prerequisite, not an assumed property
+## Update invariants; physical mechanism reopened
 
-The user selected option B; option A remains below only to explain its restrictions. This is design reasoning, not a verified implementation. Neither strategy promises to retain arbitrary edits Brain never observed. Metadata structs are not a preservation codec; source snapshots must retain authorized original bytes, unknown properties and human text.
+The user retains stable Memory identity, a current work context and separate retained history. Rejecting H1's representation means its fixed-base/editable-view/BMR architecture must not be silently imposed on the replacement. The new proposal must explain how normal meaningful updates preserve accepted prior states and how the current Markdown remains understandable, without automatic historical deletion or extra compaction.
 
-### Option A: in-place patches
+Observed manual edits require notification and human approval before acceptance; preserve their bytes, do not silently merge/retag/reinterpret them. Concurrent sessions negotiate update order and storage must reject stale conflicting updates. Project association cannot change as an implicit content-update side effect. No newest-file/session-wins or fabricated success after partial I/O.
 
-A preservation-aware patcher, expected revision and per-memory lock can coordinate cooperating Brain writers. Hash-check followed by temporary-file rename is **not compare-and-swap** against a noncooperating Obsidian editor; backups/rechecks narrow but do not close that race.
-
-Known manual drift or an unsafe merge requires review. If the guarantee is never overwriting an unseen external edit, automatic in-place update remains unavailable unless an exclusive edit window or editor cooperation is established. Lack of detected drift is not proof of exclusivity.
-
-### Selected option B: logical updates through new revisions
-
-The user accepted revision-based logical updates with a separate human-editable view. The mechanism introduces storage/schema behavior not supplied by the current metadata or reader research; concrete implementation and guarantees are not yet established.
-
-- Keep stable memory/project/collection identity. Each write-once successor has a revision ID/digest, parent revision(s), content, original-byte snapshot references and source/session provenance.
-- Publish unique records without replacing existing files. Coordinate Brain writers, compare the expected logical head and reject stale updates. Derive heads from validated parent links or an equally coordinated selection record, not filename, modification time or session order.
-- Multiple heads are a conflict: retain the branches and return needs_review, never silently select a winner. Explicit reconciliation may produce a successor citing both parents. Current means a resolved logical head; superseded retains history, not proof the earlier claim was false.
-- Keep a human-editable source/working view separate and untouched by automatic publication. Divergence from its recorded base must be reported rather than silently treating a successor as reconciled with human edits. Accepting manual edits into revisions needs an explicit policy; do not capture unrelated notes.
-- All participating revision-store writers must respect write-once records. A same-user filesystem convention is not tamper protection. Arbitrary editors must use the separate editable view/copy; if they rewrite/delete revision records too, immutability cannot be promised.
-
-Append-only publication prevents Brain from overwriting source notes through that path; it does not by itself solve head selection, semantic conflicts, human-edit capture or arbitrary-editor interference. The chosen behavior is revision-based logical update with a separate editable view. Automatic same-note replacement is not the selected first design; adding it would require a separate decision and the necessary cooperation/exclusive-window guarantees.
-
-The requested create/read/update capability must not be reported complete while the chosen safe-update behavior is missing.
+Metadata structs alone are not a Markdown preservation codec. Locks/expected revisions coordinate cooperating writers; hash checks plus rename are not universal CAS against a noncooperating editor. Neither design can promise to capture edits never observed. State real failure/atomicity limits plainly rather than expanding into another unapproved archive architecture. Exact current-file/history mechanism is still the new proposal's subject.
 
 ## Integration recommendation and implementation prerequisites
 
-Prefer a small, versioned JSON CLI interface consumed by a StelaShell connector whose scope comes from trusted host state. Conditional structured output aligns with Brain's reported CLI design, but it is not implemented as a memory interface today.
+Parent recommends a small local versioned JSON CLI consumed by an SS memory adapter with trusted host scope. Brain already has an executable/CLI, so this reuses that boundary without introducing an initial daemon, TCP/HTTP service or MCP server. Exact commands/protocol are proposals, not existing memory CLI functionality.
+
+Proposed flow: first genuine user prompt -> adapter selects the authorized working context and invokes the configured trusted Brain executable directly (no shell command string) -> Brain resolves/validates the marker read-only using its existing TOML capability -> adapter validates structured finite output and delivers current context to the agent. Marker parsing belongs in Brain rather than introducing a second parser/dependency in SS; initial resolution must not create Memory/marker files. During a useful turn the agent may prepare an authorized five-section candidate. Under the now-approved future Memory-only policy, publication waits for successful response completion; Brain validates/publishes against the expected accepted state and SS shows the actual saved/failed/pending result. Preparation is not a confirmed save; no new Memory on failed/cancelled/empty/greeting interactions. No full transcript capture, hidden secondary model, blind retry or permission inference from UUIDs. Calls need cancellation/deadlines/output bounds/version checks; exact limits await implementation planning, not claims of current operation.
+
+The user confirmed the future installer choice: with Brain, install/prepare a compatible executable and explicitly selected vault under installer consent, then enable the adapter; without Brain, retain WORK_STATE.md and create no Brain bindings. Version/source/integrity checks and actual installation remain future engineering/authorization. Parent proposes one adapter/provider boundary rather than duplicating FARO: Brain backend or existing WORK_STATE backend. A runtime Brain failure must leave SS usable, report memory unavailable/save pending and not silently invent successful persistence, a new ID, dual canonical writes or automatic cross-backend synchronization. A temporary fallback/reconciliation policy remains to be made explicit.
+
+Prior consultation390d66695fdefbf4e6e81af54f08ec06 completed but its representation was rejected. Replacement consultationb463bd841ff96c853d9cae84f84b89b6 completed in two parts on the new Brain session, with restored baseline and ordinary-Markdown recommendation reported above. No proposal receipt/completion is implementation/dependency approval.
 
 No daemon, model, vector database, framework or second StelaShell memory store is currently justified. Any new dependency would still require its applicable approval; this proposal is not a dependency decision.
 
-The inspected Brain baseline provides init/config commands and metadata validation, not content operations or retrieval. Prerequisites are:
+The delivered core now provides Memory operations as well as init/config; broader general-note retrieval is not included. SS integration must reuse the existing core while resolving the review findings, not reimplement these capabilities:
 
 1. Preservation-aware Markdown/frontmatter reading and schema compatibility rules.
-2. Verified project resolution, repository binding and logical ownership.
+2. Confirmed working-context-to-Memory binding, scoped authority and optional Project resolution.
 3. Safe creation and the selected update strategy: preservation-aware coordinated patches or unique revision publication/parent validation, with evidenced conflict and human-edit behavior.
-4. Scoped lexical retrieval with finite count/text/I/O bounds and explicit result/error states.
+4. Direct marker/UUID lookup and bounded structured results with explicit complete/partial/error states; broader lexical retrieval is separate future scope.
 5. A structured interface, then a permission-preserving StelaShell connector.
 
 A read/create-only early delivery can be useful, but would remain incomplete against the requested update behavior. No runtime or profile loading route is changed by this plan.
 
-The user authorized H1 implementation and isolated synthetic tests; both planning results are received and the required preimplementation scope/files/structure summary has been SHOWN. The first code handoff was rejected with `Message expired or has an invalid lifetime`; it was not retried or migrated. The subsequent isolated diagnosis reproduced the ordinary ten-minute lineage restriction, but did not capture the failed envelope's actual clock/expiry. The separately approved [sessions work context](SESSIONS_WORK_CONTEXT_PLAN.md) is now implemented and functionally checked, with its independent review still incomplete. The user then reported manually reloading Brain and this parent and explicitly requested resuming implementation. A NEW work-root H1 assignment to Brain's freshly discovered activation was accepted for delivery with a fixed 60-minute communication window. This is not a commitment/start/completion receipt, task-runtime/cost guarantee or renewal of the expired thread. Brain must verify current source/permissions before writing and remains the sole Brain writer. All H1 restrictions below remain; dependencies/new scope/protected actions require their own authorization. Brain now reports a working main lifecycle and passing focused lifecycle/divergence/branch/bounds/process-contention tests, with offline dependencies available on the expected baseline. Final publication-failure/uncertain-I/O evidence, docs/regressions and review readiness remain pending. This is peer-reported intermediate progress, not parent-verified H1 completion.
+## Delivered Brain core/CLI; review findings precede SS integration
+
+Rejected R1 checkpoint7759e25bbe6ee49894fb2aca57b63725 at /tmp/brain-memory-r1-containers.K9KEeB remains diagnostic only:91tests=87+4 and the old literal/R2/R3 harness passed, but independent probes found ordinary lists/quotes rejected and genuine-link old histories reported partial/history_document_invalid. Human rejected that blanket restriction. Normal Markdown/old valid snapshots are required, with no rewriting of content/history.
+
+Accepted R1 handoff66900544b2316581b4eb874be9de55c5, received threadbe5d4ca79a0dd1a2759daf79ec564b15: /tmp/brain-memory-comment-chain.N9bkmy/debug/brain SHA256 dd9da947238e6d59df767f8d58f330aa7f1acfed2708c0cd1224345bb5d49ddf; syntax692511fa870ba858d0178c323fb36064a999d73739eb3ac58e916c1b2b062973; manifest6dd7d6f7a70c25a266dbc2b566de94dae13d3ca4e931630e88297e4862c96483. Parent matched all29 entries before/after its own CLI probes,25 prior entries incl oldd2 BIN preserved; only syntax/containers/MEMORY/WORK_STATE differ. Removing ONLY the two added tests+opaque_comment helper reconstructs exact prior9-test SHAac0f2cc17f3643b01d875963727729728f8824fccf9fbd539dca7fa94b38cf32, proving old assertions unchanged; adjudicated corrections fixture also unchanged. Frozen Cargo82c71f.../4549f87..., storage/binding/history/markdown/CLI/four initial suites unchanged; config/init/vault+tests match HEAD.
+
+R1 CLOSED within reviewed Brain scope: comment_view masks ONLY the earliest currently Html-event-eligible comment through its source-level closer, then next_comment reparses before selecting later openers. Fake code inside a comment cannot hide subsequent real comments or cause stale eligibility in later real code. Each round removes at least one visible opener without creating any, preserving byte/newline/UTF8 positions; no pass cap, persisted normalization, container ban or history rewrite. Canonical five top-level H2s and genuinely active history/optional Project relations are preserved. Existing genuinely valid list/quote snapshots stay byte-identical; literal-only unsound baselines remain partial/preserved, not repaired.
+
+Integrated98=87 preserved other tests+11 container declarations,0fail independently reconciled from checks.log; targeted29=11+15+3 reported. Clippy finish/preservation log inspected; clippy all-targets -D warnings, fmt/diff checks reported, no duplicate parent Cargo suite. All FOUR matching-BIN reports pass: masking8/8, boundary28/28, negative5R1/10R2/5R3, positive3legacy/create saved/8forms. Parent actually reran unmodified masking-interactions.py against final BIN: independently expected2openers*4forms=8, observed8/8 saved revision2 with exact expected bytes, including both former false rejections. Both new regression bodies inspected: chains/fake backtick+tilde, real-code/inline/escaped/attribute neighbors, both relations/real H2s, LF/CRLF/CR, unknown YAML/raw/latest snapshots and rejecting rediscovered comment-only links unchanged.
+
+Evidence /tmp/ss-brain-chain-review-qm3lmtfq/{source-review.json,masking-interactions.parent.json,review-conclusion.json}; prior .1X1wnx8-case6pass/2fail artifact is now resolved negative history, not a blocker. Reparse can cost comment-count*document-length; no performance bound/benchmark claimed. Linux/Rust1.100/debug only; no MSRV runtime/other-OS/Obsidian/release/SS/security/exhaustiveness/CAS/power-loss proof. Additional074d source-only review is implementer-reported, not parent helper evidence; oldb172 timeout stays incomplete/not relaunched. No required code/result/helper outstanding. No parent Brain application/build/Cargo/network/real-vault/profile/Git/cutover changes.
+
+Communication limitation, NOT a code blocker: Brain reports root32f4... reply returned WORK_EXPIRED; actual handoff6690... arrived after its own human-requested resend in newbe5d... thread. Parent attempted a substantive acceptance reply to incoming6690... WITHOUT work override; observed CONTEXT_MISMATCH: Reply cannot replace, upgrade or downgrade the active work context. It was NOT delivered and was NOT retried/renewed/migrated or routed through another anchor/session/helper/file channel. Brain receipt of parent acceptance is unconfirmed; parent scoped technical closure/evidence remains valid. Any further communication must respect a legitimately available authorized context, not automatic workaround. No new protected approval follows from peer messages.
+
+## Historical H1 context — removed, not the new design baseline
+
+The following H1 plan/results describe the old9b4a959 tree only. New Brain reports restoration to standalone main1e6c2aa and removal of the experimental module/tests/format. These historical paths/limits/approvals are not current implementation instructions, migration authority or evidence for the replacement.
+
+The user authorized H1 implementation and isolated synthetic tests; both planning results are received and the required preimplementation scope/files/structure summary has been SHOWN. The first code handoff was rejected with `Message expired or has an invalid lifetime`; it was not retried or migrated. The subsequent isolated diagnosis reproduced the ordinary ten-minute lineage restriction, but did not capture the failed envelope's actual clock/expiry. The separately approved [sessions work context](SESSIONS_WORK_CONTEXT_PLAN.md) is now implemented and functionally checked, with its independent review still incomplete. The user then reported manually reloading Brain and this parent and explicitly requested resuming implementation. A NEW work-root H1 assignment to Brain's freshly discovered activation was accepted for delivery with a fixed 60-minute communication window. This is not a commitment/start/completion receipt, task-runtime/cost guarantee or renewal of the expired thread. Brain remained the sole source writer and delivered the scoped implementation. Its later handoff reports direct human clarification that the untracked odd/ records were intentionally deleted and must remain absent, plus separate authorization in Brain for one local commit of its existing base and H1. Parent observed commit9b4a959 and independently verified all41 remaining protected baseline files unchanged, with only the permitted library export changed and exactly5 odd records absent. The deletion's intent and Brain-session Git permission are reported from that session, not independently attributed or transferred to this parent. No restore, source edit or Brain publication was performed here. H1 implementation/review evidence is below; no full memory-product or operational connector completion is claimed.
 
 ### Concrete H1 plan from Brain
 
@@ -128,7 +213,7 @@ docs/WORK_STATE.md                 new: Brain continuity for the authorized unit
 
 No changes are planned to `document.rs`, main/CLI/config/vault, Cargo manifests/lock/features, existing tests, odd/, the Brain/ vault or .codegraph. Existing tracked/untracked work must be preserved. Brain is the sole source writer; parent owns these StelaShell docs, with separate read-only review when concrete implementation is available.
 
-Proposed API: `create_from_view`, `read_revision`, `read_current`, `publish_successor`. The caller creates the agent-memory view first; creation snapshots it and publication never rewrites it. H1 does not generate IDs or author/generalize Markdown.
+Delivered provisional H1 API: `create_from_view`, `read_revision`, `read_current`, `publish_successor`. The caller creates the agent-memory view first; creation snapshots it and publication never rewrites it. H1 does not generate IDs or author/generalize Markdown.
 
 ```text
 <root>/<project-uuid>/stela-shell/
@@ -142,9 +227,9 @@ The provisional single-file record has a magic marker, checked header length, ve
 
 A clean but old editable view may be view_stale after a successor, while manual changes relative to its OWN base require needs_review. Manual import/reconciliation, full search, CLI/skill/connector, real-vault activation and profile/service changes are excluded. A trusted stable parent directory is a precondition, not a malicious-same-user sandbox.
 
-Brain reports Rust/cargo 1.100.0 and existing std/direct-crate primitives sufficient for this plan: std file locks require Rust >=1.89; current serde/toml/tempfile/uuid are used without generation/features/dependency changes. This is inspection evidence, not an offline-cache/build verification. The 800–1100 authored-line forecast includes code/tests/docs and is not permission to expand the separately blocked reader scope or override restrictions.
+Brain reports Linux x86_64/rustc+cargo1.100.0 and successful locked offline checks using existing std/serde/toml/tempfile/uuid, with no H1 dependency/feature changes. Std file locks require Rust >=1.89. The parent counted1576 formatted lines across the six H1 paths, exceeding the original800–1100 forecast without changing the approved file/feature boundary; the forecast was guidance, not permission to expand the separately blocked reader scope.
 
-Approved offline checks, awaiting the implementer's observed results:
+The implementer reports these approved offline checks passed; the parent did not rerun unchanged checks merely to duplicate the writer's evidence:
 
 ```sh
 cargo test --locked --offline --test memory_store
@@ -153,13 +238,37 @@ cargo test --locked --offline --test cli_init --test cli_config
 # Scoped rustfmt --check for the touched Rust files.
 ```
 
-Missing offline artifacts are a blocker, not download permission. All fixtures must be temporary/synthetic; no source-note overwrite, automatic import, real-vault write, new dependency, external/model trial, branch/commit or publication is authorized. H1 includes logical update but is not the complete memory feature.
+Missing offline artifacts are a blocker, not download permission. All fixtures must be temporary/synthetic. H1 itself authorizes no source-note overwrite, automatic import, real-vault write, new dependency, external/model trial or parent Brain Git/publication action; Brain's separate reported local-commit decision is distinguished above. H1 includes logical update but is not the complete memory feature.
 
-## H1 planning checklist and isolated acceptance
+## Historical H1 primitive and bounded review
 
-The independent StelaShell review examined the contract/continuity only, not Brain source or runtime behavior. The following are acceptance expectations, not evidence of executed tests. Find/search, manual import/reconciliation and the connector remain outside H1.
+Concrete Brain baseline: `feat/brain-file-model@9b4a95933002028ce8c16f02c278038545810ae7` includes the pre-existing Brain base and H1, not just this unit. Parent confirmed20 committed paths, no personal Brain/ vault or .codegraph/ in that commit, and only those two directories untracked at the review checkpoint. Local commit authorization was reported from Brain's direct human exchange; it is not parent permission to stage/commit/push there. No Brain push was observed or performed by parent.
 
-Before code, the current-source plan must explain:
+Public types include `Binding`, `Metadata`, `Header`, `ReadResult`, `Publication` and explicit errors. A typed Project/UUID/root validates structure, not consent or repository mapping. Fixed collection is `stela-shell`; caller supplies UUIDs and the pre-existing view. Header provenance records claim kind, source references, session and observation milliseconds as inert attribution, not verified truth or authority.
+
+- Record: `BRAINMR1` + little-endian u32 header length + versioned TOML header + exact raw payload. Numeric revisions are positive and bounded by `i64::MAX`, not hashes or timestamps. `store_version=1` is separate from document `brain_version`.
+- View/base: original revision1 remains the editable view's own base. `Base`, `Stale` and `Diverged` are explicit; generated successors never rewrite the view or prior revisions. Read states are `Current`, `Historical` and `Unresolved`. Multiple heads remain retained and require review.
+- Coordination/publication: persistent nonblocking collection lock, expected-head validation and checked allocation precede tempfile no-clobber namespace publication. `Busy`, stale conflict, collision, `PublicationUncertain`, `AfterPublication` and published-with-review are distinct. Existing final records are not rolled back; isolated pending remnants are bounded/ignored, never adopted/deleted.
+- Bounds: header16KiB, payload/view1MiB, whole graph8MiB/128 revisions/144 directory entries, returned body64KiB, metadata32 sources with supplied strings/title/session bounded to2048 bytes. Total length/truncation are explicit; invalid graph/scope/version/framing cannot advertise a clean partial head.
+- Limitations: even historical reads currently require a present/safe/readable view; ordinary divergence and competing-head history are supported. General request-key/exactly-once behavior, ID generation, manual import/reconciliation, general YAML reading, search/CLI/connector and real-vault project verification are absent. No hostile-filesystem CAS, arbitrary-editor tamper protection, multi-file transaction or power-loss guarantee.
+
+| Evidence | Result and provenance |
+| --- | --- |
+| `memory_store` integration | Brain reports10 passed;1 ignored IPC entry is explicitly executed/checked by its deterministic process test. |
+| Library tests | Brain reports12 passed:7 existing metadata +5 private publication/lock tests. |
+| Existing init/config regressions | Brain reports10 +5 passed; source/tests matched the pre-H1 snapshot. |
+| Formatting/whitespace | Brain reports scoped rustfmt and diff checks passed. |
+| Parent acceptance inspection | Public types, format docs, integration assertions and private failure-test assertions inspected; no concrete additional correction identified. Runtime checks were not repeated. |
+| Independent source review | `task-fe3bf488-37c9-4a0b-b43e-9caf54847df4` completed: no concrete lock/publication/head-integrity violation found within cooperating-writer/trusted-stable-ancestor assumptions. No tests/platform execution by helper. |
+| Review relevance/preservation | Parent hash comparison confirmed reviewed source/tests/docs unchanged and identical to9b4a959 despite the generic mutation warning. Of47 baseline entries,41 protected files match, src/lib.rs only adds memory, and5 odd records are absent; intentional deletion is reported by Brain's direct human exchange, not filesystem attribution. |
+
+The37 passing main tests above are implementer-observed evidence, not a parent runtime audit. No Windows/network-filesystem/full-suite/clippy/power-loss certification. Source/test references: Brain `src/memory/{mod,store}.rs`, `tests/memory_store.rs`, `docs/PROJECT_MEMORY_STORE.md`; original preservation snapshot remains outside Git at `/tmp/brain-h1-baseline.json` and is not a durable repository artifact.
+
+## Historical H1 checklist and isolated acceptance
+
+The earlier planning review covered contract/continuity only; the later concrete source review and implementer-reported checks are distinguished above. The matrix below remains the semantic acceptance reference, not an additional claim of runtime/security verification. In H1, consent/repository grants are trusted-caller preconditions, not a delivered authorization service. Find/search, manual import/reconciliation and connector remain outside H1.
+
+The fulfilled pre-code plan covered:
 
 - Trusted synthetic binding representation and minimal record/view/base-snapshot layout, including compatibility with existing Brain metadata.
 - The exact record framing/raw-byte domain, any implemented integrity checks, head/parent validation, writer coordination and divergence check points. Numeric revision identity does not imply a cryptographic digest or tamper protection.
@@ -185,23 +294,23 @@ Later interface acceptance must also verify that a directed personal/other-proje
 
 ## Decisions still open
 
-- Select the trusted repository-to-Project binding and explicit-grant lifetime.
-- Approve Note schema extensions/compatibility and minimum memory granularity/provenance.
-- Define how manual edits become accepted revisions and conflicts are reconciled. The initial behavior can report divergence/needs_review without auto-importing human edits; implement and evidence the selected logical-revision strategy before enabling automatic update.
-- Select exact interface/result limits and serialization; external processing, automatic deletion and transcript capture are not included.
+- Brain correction has no pending code/result/helper; R1/R2/R3 scoped closed. Acceptance notice is undelivered after observed CONTEXT_MISMATCH, without retry/renewal/alternate route. Any further communication must use applicable legitimate context/authority; no new protected scope follows.
+- Define technical shared-copy/concurrent creation and live-session negotiation, plus manual-change approval/import mechanics. Copies share the SAME Memory; human approval before accepting manual edits and nonblocking missing-memory offers are confirmed behavior, not unresolved product choices.
+- Implement SS client/lifecycle/permission/manual-approval/status mechanics against delivered brain memory v1 only after scope approval and core findings are resolved/explicitly qualified. Missing-reference new creation must use Brain-owned `replace_missing`, already delivered/scoped verified, with actual host-enforced approval; never direct SS marker writes. Optional installer/cutover remain separate.
+- Plan WORK_STATE migration only after the new model and integration exist; preserve the current record meanwhile. No proactive growth intervention, automatic deletion, external processing or transcript capture.
 
-The product vision, initial automatic-own-project versus explicit-personal/cross-project boundary, shared project collection and revision-based logical updates with a separate editable view are confirmed and should not be asked again.
+The general-second-brain vision, Memory-as-work-context model, optional Project grouping, stable identity across folder moves and revision-based logical updates are confirmed. Own-context automation does not authorize personal/other-context access. Do not re-ask settled choices, including .brain.toml/TOML binding_version+memory_id and the explicit subfolder conditions. First-prompt useful-turn persistence and child declaration encoding are accepted. The five-section current-context/separate-history and observe-normal-growth policies are confirmed. Shared-copy identity, manual-approval/missing-memory behavior, peer coordination policy and optional installer modes are confirmed. Remaining SS concurrency/approval/client/lifecycle/status/install/migration mechanics are not resolved by Brain-core acceptance; delivered CLI and scoped Markdown validation are not open product questions. No later growth intervention is authorized.
 
 ## Evidence and limitations
 
-This proposal integrates Brain primary-session briefing `b293be4fb8a338c4c25733b9290f6722`, contract recommendation `2031aa04d8ed6f695fda576e7baa3e99` and safe-update recommendation `c34adb3142003ab20755784ec2d88bef`. They are peer-reported source/design inspection and reasoning, not verified implementations or a new parent runtime audit. The safe-update recommendation reused src/document.rs, src/config.rs::save_config_to and the file-model research; no files, new audit or runtime checks were produced.
+The original proposal integrates Brain primary-session briefing `b293be4fb8a338c4c25733b9290f6722`, contract recommendation `2031aa04d8ed6f695fda576e7baa3e99` and safe-update recommendation `c34adb3142003ab20755784ec2d88bef`. They are peer-reported source/design inspection and reasoning, not verified implementations or a new parent runtime audit. The safe-update recommendation reused src/document.rs, src/config.rs::save_config_to and the file-model research; no files, new audit or runtime checks were produced.
 
 Brain repository: `../../Brain/` relative to the StelaShell repository root. Source references below are relative to Brain, not this document:
 
 - `src/document.rs`: CommonMetadata, DocumentMetadata and validate; explicitly not a preservation codec.
 - `src/cli.rs`: implemented command surface in the inspected baseline.
 - `src/config.rs`: save_config_to and its concurrency disclaimer.
-- `odd/tasks/brain-file-model.md`: milestones and Block 2 research outcome, with no writer yet.
+- Historical `odd/tasks/brain-file-model.md`: earlier milestones/Block2 research evidence; now absent, with intentional user deletion reported by Brain. Do not restore or treat it as a reachable current reference.
 - `Brain/03-recursos/desarrollo/Diseño de CLI.md`: result communication and tool/agent design.
 
-The reported baseline was a working tree with modified/untracked material, not a released API. Re-read relevant current Brain source before any later implementation. No Brain files, services, vault contents or runtime settings were changed to produce this proposal.
+The original baseline was an extensively modified/untracked tree, not a released API. The original proposal changed no Brain files/services/vault/runtime state; later H1 was implemented by Brain and reviewed as distinguished above. Re-read relevant current source before future changes. No broader memory integration, publication or permission follows from this record.
