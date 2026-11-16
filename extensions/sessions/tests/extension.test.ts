@@ -9,7 +9,8 @@ function harness(env: NodeJS.ProcessEnv = {}, opening?: Promise<void>) {
   const sent: any[] = [], widgets: any[] = [], transports: any[] = [], flags = new Map<string, unknown>();
   let sessionId = "principal-a", idle = true;
   const branch: any[] = [];
-  const manager = { getSessionId: () => sessionId, getSessionName: () => "Principal", getBranch: () => branch };
+  const manager = { getSessionId: () => sessionId, getSessionName: () => "Principal", getBranch: () => branch,
+    getLeafId: () => branch.length ? branch.at(-1).id ?? `fixture-leaf-${branch.length}` : null, getLeafEntry: () => branch.at(-1) };
   const ctx: any = { cwd: "/workspace", hasUI: true, sessionManager: manager, isIdle: () => idle,
     ui: { setWidget: (...args: any[]) => widgets.push(args), notify: () => {} } };
   const pi: any = {
@@ -213,6 +214,119 @@ test("unsupported work errors expose a safe reason and do not renew or silently 
   assert.equal(rejected.isError, true); assert.equal(rejected.details.code, "UNSUPPORTED_WORK_CONTEXT");
   const repeat = await tool.execute("not-renewed", args, undefined, undefined, h.ctx);
   assert.equal(repeat.details.code, "INVALID_WORK_CONTEXT"); assert.equal(sends, 1);
+  await h.emit("session_shutdown");
+});
+
+test("acknowledgment caches only unchanged-leaf misses and still requires committed active-branch evidence", async () => {
+  const h = harness(); await h.emit("session_start"); h.setIdle(false);
+  const manager = h.ctx.sessionManager, getBranch = manager.getBranch;
+  let scans = 0; manager.getBranch = () => { scans++; return getBranch(); };
+  h.transports[0].receive(sender(), incoming());
+  const proposal = await h.emit("turn_end", { outcome: "completed", entries: [] });
+  // An uncommitted proposal must not count; null is a real leaf, not an uninitialized cache.
+  for (let i = 0; i < 5; i++) await h.emit("context");
+  assert.equal(scans, 1); assert.match(h.widgets.at(-1)[1][0], /1 pendientes/);
+  h.branch.push({ ...proposal.entries[0], details: { ...proposal.entries[0].details, activation: newId() } });
+  await h.emit("context"); await h.emit("context"); assert.equal(scans, 2);
+  h.branch.push(proposal.entries[0], { type: "message", id: "later-leaf" });
+  await h.emit("context"); assert.equal(scans, 3, "a changed-leaf miss must inspect the active branch");
+  assert.match(h.widgets.at(-1)[1][0], /0 pendientes/);
+  h.transports[0].receive(sender(), incoming());
+  const next = await h.emit("turn_end", { outcome: "completed", entries: [] });
+  h.branch.push(next.entries[0]); await h.emit("context");
+  assert.equal(scans, 3, "a matching committed leaf needs no full branch scan");
+  assert.match(h.widgets.at(-1)[1][0], /0 pendientes/);
+  await h.emit("session_shutdown");
+});
+
+test("host interleaved replies isolate exact targets without extension-input resets or implicit renewal", async (t) => {
+  let now = 1000; t.mock.method(Date, "now", () => now);
+  const h = harness(); await h.emit("session_start"); await h.emit("input", { source: "rpc" }); h.setIdle(false);
+  const tool = h.tools.get("ss_sessions_send"), from = sender();
+  const old = await tool.execute("old", { to: from.id, text: "PRIVATE_OLD_TASK", work: {} }, undefined, undefined, h.ctx);
+  assert.equal(old.details.selection, "root"); assert.equal(old.details.hop, 0); assert.equal(old.details.expiresAt, 601_000);
+  now = 1_801_000;
+  const fresh = incoming(); h.transports[0].receive(from, fresh);
+  const proposal = await h.emit("turn_end", { outcome: "completed", entries: [] });
+  h.branch.push(proposal.entries[0]); await h.emit("context");
+  await h.emit("input", { source: "extension" });
+  const reply = await tool.execute("new", { to: from.id, text: "New result", reply_to: fresh.id }, undefined, undefined, h.ctx);
+  assert.equal(reply.isError, undefined); assert.equal(reply.details.selection, "reply_to");
+  assert.equal(reply.details.thread, fresh.thread); assert.equal(reply.details.hop, 1); assert.equal(reply.details.work, undefined);
+  assert.equal(reply.details.expiresAt, 2_401_000); assert.match(reply.content[0].text, /hop: 2\/8/);
+  const blocked = await tool.execute("implicit", { to: from.id, text: "No new anchor" }, undefined, undefined, h.ctx);
+  assert.equal(blocked.isError, true); assert.equal(blocked.details.code, "WORK_EXPIRED"); assert.equal(blocked.details.stage, "admission");
+  assert.equal(blocked.details.context.thread, old.details.thread); assert.equal(blocked.details.context.selection, "implicit");
+  assert.equal(blocked.details.context.work.deadline, 1_801_000); assert.equal(h.transports[0].outgoing.length, 2);
+  assert.doesNotMatch(JSON.stringify(blocked), /PRIVATE_OLD_TASK|secret|proof/);
+  await h.emit("input", { source: "rpc" });
+  const root = await tool.execute("human", { to: from.id, text: "Genuinely new task", work: {} }, undefined, undefined, h.ctx);
+  assert.equal(root.details.hop, 0); assert.notEqual(root.details.thread, old.details.thread); assert.equal(root.details.work.startedAt, now);
+  await h.emit("session_shutdown");
+});
+
+for (const route of ["idle", "boundary"]) for (const mode of ["work-live", "work-expired", "ordinary"]) {
+  test(`late commitment retains only admitted lineage (${route}, ${mode})`, async (t) => {
+    let now = 1000; t.mock.method(Date, "now", () => now);
+    const h = harness(); await h.emit("session_start"); h.setIdle(route === "idle");
+    const from = sender(), source = new Mailbox(); source.humanInput();
+    const value = source.prepare(h.transports[0].info.id, "PRIVATE_LATE_REQUEST", undefined, mode === "ordinary" ? undefined : {});
+    h.transports[0].receive(from, value); await tick();
+    const proposal = route === "idle" ? h.sent[0].message : (await h.emit("turn_end", { outcome: "completed", entries: [] })).entries[0];
+    assert.equal(h.transports[0].outgoing.length, 0, "a proposal is not acknowledgment or a send");
+    now = mode === "work-expired" ? 1_801_000 : 601_000;
+    // Model actual stored-entry acknowledgment, not the proposal/queued message itself.
+    h.branch.push({ type: "custom_message", ...proposal }); await h.emit("context"); await h.emit("context");
+    const tool = h.tools.get("ss_sessions_send"), result = await tool.execute("implicit", { to: from.id, text: "Implicit continuation" }, undefined, undefined, h.ctx);
+    if (mode === "work-live") {
+      assert.equal(result.isError, undefined); assert.equal(result.details.selection, "implicit");
+      assert.equal(result.details.thread, value.thread); assert.equal(result.details.hop, 1);
+      assert.equal(result.details.work.deadline, 1_801_000); assert.equal(result.details.expiresAt, 1_201_000);
+    } else {
+      assert.equal(result.isError, true); assert.equal(result.details.code, mode === "ordinary" ? "CONVERSATION_EXPIRED" : "WORK_EXPIRED");
+      assert.equal(result.details.context.thread, value.thread); assert.equal(result.details.context.selection, "implicit");
+      assert.equal(h.transports[0].outgoing.length, 0); assert.doesNotMatch(JSON.stringify(result), /PRIVATE_LATE_REQUEST/);
+    }
+    // A different admitted thread remains replyable without refreshing the late one.
+    h.setIdle(false); const independent = incoming(); h.transports[0].receive(from, independent);
+    const fresh = (await h.emit("agent_before_settle", { outcome: "completed", entries: [] })).entries[0];
+    h.branch.push(fresh); await h.emit("context");
+    const reply = await tool.execute("fresh", { to: from.id, text: "Independent result", reply_to: independent.id }, undefined, undefined, h.ctx);
+    assert.equal(reply.isError, undefined); assert.equal(reply.details.thread, independent.thread); assert.equal(reply.details.hop, 1);
+    assert.equal(h.sent.length, route === "idle" ? 1 : 0, "late commitment must not cause body redelivery");
+    await h.emit("session_shutdown");
+  });
+}
+
+test("missing commit correlation pauses admission instead of clearing into a new root or proposing another item", async (t) => {
+  const h = harness(); await h.emit("session_start"); h.setIdle(false);
+  h.transports[0].receive(sender(), incoming());
+  const proposal = await h.emit("turn_end", { outcome: "completed", entries: [] });
+  h.branch.push(proposal.entries[0]);
+  t.mock.method(Mailbox.prototype, "delivered", () => false); // An unexpected internal-correlation failure, not a normal expiry.
+  assert.equal(await h.emit("turn_end", { outcome: "completed", entries: [] }), undefined);
+  assert.throws(() => h.transports[0].receive(sender(), incoming()), /no longer receiving/);
+  const tool = h.tools.get("ss_sessions_send"), args = { to: newId(), text: "No silent fresh root" };
+  await assert.rejects(tool.execute("paused", args, undefined, undefined, h.ctx), /paused/);
+  await h.emit("input", { source: "extension" });
+  await assert.rejects(tool.execute("still-paused", args, undefined, undefined, h.ctx), /paused/);
+  assert.equal(h.transports[0].outgoing.length, 0); await h.emit("session_shutdown");
+});
+
+test("uncommitted interrupted proposal is cancelled without automatic re-proposal; genuine input remains a boundary", async (t) => {
+  let now = 1000; t.mock.method(Date, "now", () => now);
+  const h = harness(); await h.emit("session_start"); h.setIdle(false);
+  const from = sender(), source = new Mailbox(); source.humanInput();
+  const value = source.prepare(h.transports[0].info.id, "Work", undefined, {});
+  h.transports[0].receive(from, value);
+  await h.emit("agent_before_settle", { outcome: "completed", entries: [] });
+  now = 601_000; await h.emit("agent_settled", { aborted: true }); h.setIdle(true); await tick();
+  assert.equal(h.sent.length, 0); assert.throws(() => h.transports[0].receive(from, incoming()), /no longer receiving/);
+  await h.emit("input", { source: "rpc" });
+  const root = await h.tools.get("ss_sessions_send").execute("human-root", { to: from.id, text: "New authorized task", work: {} }, undefined, undefined, h.ctx);
+  assert.equal(root.isError, undefined); assert.equal(root.details.hop, 0); assert.notEqual(root.details.thread, value.thread);
+  assert.equal(root.details.work.startedAt, 601_000);
+  assert.equal(h.sent.length, 0, "an expired cancelled body is not re-injected after resumption");
   await h.emit("session_shutdown");
 });
 

@@ -3,16 +3,18 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function provider(pi: ExtensionAPI) {
-  let calls = 0;
+  let calls = 0, mixedRoot = false, mixedReply = false, mixedProbe = false;
   const action = process.env.SS_SESSION_FIXTURE_ACTION ?? "message";
   // Clock changes are confined to explicitly selected isolated fixture processes.
   if (action.startsWith("work-")) {
     const realNow = Date.now; let offset = 0;
     Date.now = () => realNow() + offset;
-    pi.registerCommand("fixture-advance", { description: "Advance only this synthetic work fixture clock, without human-input hooks.", handler: async (args) => {
-      const milliseconds = Number(args); if (!Number.isSafeInteger(milliseconds) || milliseconds < 0 || milliseconds > 3_600_000) throw new Error("Invalid fixture advance.");
-      offset += milliseconds;
-    } });
+    const advance = (milliseconds: unknown) => {
+      if (!Number.isSafeInteger(milliseconds) || (milliseconds as number) < 0 || (milliseconds as number) > 3_600_000) throw new Error("Invalid fixture advance.");
+      offset += milliseconds as number;
+    };
+    pi.events.on("ss-session-fixture:advance", advance);
+    pi.registerCommand("fixture-advance", { description: "Advance only this synthetic work fixture clock, without human-input hooks.", handler: async (args) => { advance(Number(args)); } });
   }
   if (action === "write-denied" || action === "work-denied") pi.on("tool_call", (event) => {
     if (event.toolName === "write") return { block: true, reason: "Fixture receiver denies writes." };
@@ -50,6 +52,30 @@ export default function provider(pi: ExtensionAPI) {
             text(`Outcome: ${read && !read.isError ? "answered" : "blocked"}\nEvidence: ${read ? asText(read) : "missing"}\nLimitations: deterministic fixture, not a real-model compliance check.`);
           }
         } else if (calls > 8) text("UNEXPECTED_FIXTURE_LOOP");
+        else if (action.startsWith("work-mixed-")) {
+          const prompt = context.messages.findLast((message: any) => message.role === "user" && /^(SEED|SEND):/.test(asText(message)));
+          const input = prompt ? asText(prompt) : "";
+          if (process.env.SS_SESSION_FIXTURE_ROLE === "receiver") {
+            if (peerText.includes("NEW_THREAD_FIXTURE")) {
+              if (!mixedReply) {
+                mixedReply = true;
+                tool("ss_sessions_send", { to: peerText.match(/From activation: ([a-f0-9]{32})/)![1], text: "NEW_RESULT_FIXTURE", reply_to: peerText.match(/Message: ([a-f0-9]{32})/)![1] });
+              } else if (action === "work-mixed-expired" && !mixedProbe) {
+                mixedProbe = true;
+                tool("ss_sessions_send", { to: peerText.match(/From activation: ([a-f0-9]{32})/)![1], text: "DO_NOT_RENEW_OLD_TASK" });
+              } else text("RECEIVER_RESPONDED");
+            } else if (input.startsWith("SEED:") && !mixedRoot) {
+              mixedRoot = true;
+              tool("ss_sessions_send", { to: input.slice(5), text: "OLD_WORK_FIXTURE", work: { timeout_seconds: 600 } });
+            } else text("OLD_ROOT_PENDING");
+          } else if (peerText.includes("NEW_RESULT_FIXTURE")) text("SENDER_INTEGRATED_REPLY");
+          else if (input.startsWith("SEND:")) {
+            if (!mixedRoot) {
+              mixedRoot = true;
+              tool("ss_sessions_send", { to: input.slice(5), text: "NEW_THREAD_FIXTURE", ...(action === "work-mixed-expired" ? { work: {} } : {}) });
+            } else text("REPLY_PENDING");
+          } else text("OLD_CONTEXT_RETAINED");
+        }
         else if (process.env.SS_SESSION_FIXTURE_ROLE === "receiver") {
           const sent = context.messages.some((message: any) => message.role === "toolResult" && message.toolName === "ss_sessions_send");
           const reply = (value: string) => tool("ss_sessions_send", { to: peerText.match(/From activation: ([a-f0-9]{32})/)![1], text: value, reply_to: peerText.match(/Message: ([a-f0-9]{32})/)![1] });
@@ -68,6 +94,7 @@ export default function provider(pi: ExtensionAPI) {
             }
           } else if (peerText.includes("QUESTION_FIXTURE")) {
             if (action === "work-long" && !context.messages.some((message: any) => message.role === "toolResult" && message.toolName === "fixture_hold")) tool("fixture_hold", {});
+            else if (action.startsWith("work-late-")) tool("ss_sessions_send", { to: peerText.match(/From activation: ([a-f0-9]{32})/)![1], text: "ANSWER_FIXTURE" }); // Deliberately implicit, to expose a lost lineage.
             else reply("ANSWER_FIXTURE");
           }
           else if (calls === 1 && context.messages.some((message: any) => message.role === "user" && asText(message) === "BUSY")) tool("fixture_hold", {});
@@ -76,8 +103,8 @@ export default function provider(pi: ExtensionAPI) {
         else if (calls === 1) tool("ss_sessions_list", {});
         else if (calls === 2) {
           const prompt = context.messages.find((message: any) => message.role === "user" && asText(message).startsWith("SEND:"));
-          const request = action === "message" || action === "work-long" ? "QUESTION_FIXTURE" : action === "delegate" ? "WORK_FIXTURE: delegate reading peer-source.txt to ss-helper and report the evidence." : "WORK_FIXTURE: create peer-action.txt containing PEER_ACTION_DONE followed by a newline, then report the result.";
-          tool("ss_sessions_send", { to: asText(prompt).slice(5), text: request, ...(action.startsWith("work-") ? { work: {} } : {}) });
+          const request = action === "message" || action === "work-long" || action.startsWith("work-late-") ? "QUESTION_FIXTURE" : action === "delegate" ? "WORK_FIXTURE: delegate reading peer-source.txt to ss-helper and report the evidence." : "WORK_FIXTURE: create peer-action.txt containing PEER_ACTION_DONE followed by a newline, then report the result.";
+          tool("ss_sessions_send", { to: asText(prompt).slice(5), text: request, ...(action.startsWith("work-") && action !== "work-late-ordinary" ? { work: {} } : {}) });
         } else text("REPLY_PENDING");
         const message: any = { role: "assistant", content, api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), stopReason: "pending", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
         stream.push({ type: "start", partial: message });

@@ -69,11 +69,70 @@ test("expired queued work is never delivered, while its bounded correlation/dedu
   const a = peer(), b = peer(), left = new Mailbox(() => now), right = new Mailbox(() => now);
   left.humanInput(); const root = left.prepare(b.id, "Queued", undefined, {}); right.accept(a, root);
   now = 601_000;
-  assert.equal(right.next(), undefined); assert.equal(right.pending, 0); assert.equal(right.delivered(root.id), false);
+  assert.equal(right.next(), undefined); assert.equal(right.offer(), undefined); assert.equal(right.pending, 0); assert.equal(right.delivered(root.id), false);
   assert.throws(() => right.accept(a, root), code("MESSAGE_EXPIRED"));
   const altered = { ...root, expiresAt: now + 600_000 };
   assert.throws(() => right.accept(a, altered), code("MESSAGE_CONFLICT"));
   assert.equal(right.prepare(a.id, "Correlated reply to retained anchor", root.id).work?.deadline, 1_801_000);
+});
+
+for (const mode of ["work-live", "work-expired", "ordinary"]) test(`one text-free proposal survives pruning without restoring anchors or lowering hops (${mode})`, () => {
+  let now = 1000;
+  const from = peer(), box = new Mailbox(() => now), source = new Mailbox(() => now); source.humanInput();
+  const root = source.prepare(from.id, "PRIVATE_PROPOSAL_BODY", undefined, mode === "ordinary" ? undefined : {});
+  box.accept(from, root); assert.equal(box.offer()?.message.id, root.id);
+  const state = box as any, proposal = state.offered;
+  assert.deepEqual(Object.keys(proposal).sort(), ["id", "thread"]); assert.equal(proposal.thread.text, undefined);
+  assert.equal(proposal.thread, state.threads.get(root.thread)); assert.equal(box.next()?.state, "accepted");
+  // The same text-free thread object must learn a later branch's causal maximum.
+  box.accept(from, { ...root, id: newId(), hop: 7 });
+  now = mode === "work-expired" ? 1_801_000 : 601_000;
+  assert.equal(box.pending, 0); assert.equal(box.offer(), undefined, "expiry cannot repropose a retained reservation");
+  const retained = mode === "work-live" ? 2 : 0;
+  assert.equal(state.history.size, retained); assert.equal(state.threads.size, retained ? 1 : 0);
+  assert.equal(box.delivered(newId()), false); assert.equal(state.offered, proposal);
+  assert.equal(box.delivered(root.id), true); assert.equal(box.delivered(root.id), false); assert.equal(state.offered, undefined);
+  assert.equal(state.history.size, retained, "commit must not recreate pruned correlation/deduplication IDs");
+  assert.equal(state.implicit.hop, 7); assert.equal(state.implicit.text, undefined);
+  assert.throws(() => box.prepare(from.id, "Implicit continuation"), code(mode === "work-live" ? "HOP_LIMIT" : mode === "ordinary" ? "CONVERSATION_EXPIRED" : "WORK_EXPIRED"));
+});
+
+for (const work of [false, true]) test(`offered identity still rejects renewed peer metadata after its indexed history expires (${work ? "work" : "ordinary"})`, () => {
+  let now = 1000;
+  const from = peer(), box = new Mailbox(() => now), source = new Mailbox(() => now); source.humanInput();
+  const root = source.prepare(from.id, "Original request", undefined, work ? {} : undefined);
+  box.accept(from, root); assert.equal(box.offer()?.message.id, root.id);
+  now = work ? 1_801_000 : 601_000;
+  const forged: Envelope = { ...root, id: newId(), expiresAt: now + 600_000,
+    ...(work ? { work: { ...root.work!, startedAt: now, deadline: now + 1_800_000 } } : {}) };
+  assert.deepEqual(validateMessage(forged, now), forged, "standalone wire shape is valid; retained identity must reject the renewal");
+  assert.throws(() => box.accept(from, forged), code("CONTEXT_MISMATCH"));
+  if (work) {
+    const { work: _work, ...downgraded } = forged;
+    assert.throws(() => box.accept(from, { ...downgraded, id: newId() }), code("CONTEXT_MISMATCH"));
+  }
+  const otherThread = newId(), reusedId: Envelope = { ...forged, id: root.id, thread: otherThread,
+    ...(work ? { work: { ...forged.work!, id: otherThread } } : {}) };
+  assert.deepEqual(validateMessage(reusedId, now), reusedId);
+  assert.throws(() => box.accept(from, reusedId), code("MESSAGE_CONFLICT"), "an outstanding proposal ID cannot be reused for a different fresh thread");
+  assert.equal((box as any).history.size, 0); assert.equal((box as any).threads.size, 0); assert.equal((box as any).received, 1);
+  assert.equal(box.delivered(root.id), true);
+  assert.throws(() => box.prepare(from.id, "No renewed implicit context"), code(work ? "WORK_EXPIRED" : "CONVERSATION_EXPIRED"));
+  source.humanInput(); const independent = source.prepare(from.id, "New independent admitted job", undefined, {});
+  box.accept(from, independent);
+  const reply = box.prepare(from.id, "Independent result", independent.id);
+  assert.equal(reply.thread, independent.thread); assert.notEqual(reply.thread, root.thread); assert.equal(reply.hop, 1);
+});
+
+test("withdrawing an uncommitted proposal releases its sole reservation without acknowledging expired mail", () => {
+  let now = 1000;
+  const box = new Mailbox(() => now), from = peer(), first = { id: newId(), thread: newId(), hop: 0, expiresAt: 601_000, text: "First" };
+  box.accept(from, first); assert.equal(box.offer()?.message.id, first.id);
+  box.withdraw(); assert.equal((box as any).offered, undefined); assert.equal((box as any).implicit, undefined);
+  now = 601_000;
+  assert.equal(box.offer(), undefined); assert.equal(box.delivered(first.id), false);
+  const next = { ...first, id: newId(), thread: newId(), expiresAt: 1_201_000 };
+  box.accept(from, next); assert.equal(box.offer()?.message.id, next.id); assert.equal(box.delivered(next.id), true);
 });
 
 test("work replies bind exact peer, work, thread and immutable metadata; replay cannot lower hops", () => {
@@ -115,12 +174,111 @@ test("delayed correlated branch results cannot lower the active work hop or lose
   assert.equal(p.left.prepare(p.b.id, "Follow-up on old anchor", delayed.id).hop, 3);
 });
 
-test("a committed unrelated entry cannot replace even an expired active work boundary", () => {
+test("an independent exact reply is isolated, but cannot replace an expired implicit work boundary", () => {
   const p = pair(); p.setTime(1_801_000);
   const unrelated: Envelope = { id: newId(), thread: newId(), hop: 0, expiresAt: 2_401_000, text: "Unrelated fresh entry" };
   p.right.accept(p.a, unrelated); p.right.delivered(unrelated.id);
-  assert.throws(() => p.right.prepare(p.a.id, "Cannot downgrade", unrelated.id), code("WORK_EXPIRED"));
+  const reply = p.right.prepare(p.a.id, "Reply to the genuinely new request", unrelated.id);
+  assert.equal(reply.thread, unrelated.thread); assert.equal(reply.hop, 1); assert.equal(reply.expiresAt, 2_401_000); assert.equal(reply.work, undefined);
   assert.throws(() => p.right.prepare(p.a.id, "Cannot omit reference"), code("WORK_EXPIRED"));
+  assert.throws(() => p.right.prepare(p.a.id, "Cannot renew", undefined, {}), code("WORK_EXPIRED"));
+});
+
+for (const expired of [false, true]) for (const freshWork of [false, true]) for (const samePeer of [false, true]) {
+  test(`mixed threads: exact target isolates ${expired ? "expired" : "live"} old work from new ${freshWork ? "work" : "ordinary"} (${samePeer ? "same" : "different"} peer)`, () => {
+    const p = pair();
+    for (let hop = 1; hop <= 6; hop++) assert.equal(p.right.prepare(p.a.id, "Old causal branch").hop, hop);
+    const now = expired ? 1_801_000 : 5000; p.setTime(now);
+    const from = samePeer ? p.a : peer(), source = new Mailbox(() => now); source.humanInput();
+    const fresh = source.prepare(p.b.id, "Genuinely independent admitted request", undefined, freshWork ? {} : undefined);
+    p.right.accept(from, fresh); p.right.delivered(fresh.id);
+    assert.throws(() => p.right.prepare(peer().id, "Wrong peer", fresh.id), code("REPLY_TARGET_NOT_RETAINED"));
+    assert.throws(() => p.right.prepare(from.id, "No upgrade/renewal", fresh.id, {}), code("INVALID_WORK_CONTEXT"));
+    const reply = p.right.prepare(from.id, "New result", fresh.id);
+    assert.equal(reply.thread, fresh.thread); assert.equal(reply.replyTo, fresh.id); assert.equal(reply.hop, 1);
+    assert.equal(reply.expiresAt, now + 600_000); assert.deepEqual(reply.work, fresh.work);
+    assert.equal(source.accept(p.b, reply), "accepted");
+    if (expired) {
+      assert.throws(() => p.right.prepare(p.a.id, "Expired anchor", p.root.id), code("REPLY_TARGET_NOT_RETAINED"));
+      assert.throws(() => p.right.prepare(p.a.id, "Implicit old task"), (error: unknown) => {
+        assert.ok(code("WORK_EXPIRED")(error));
+        assert.equal((error as SessionError).context?.selection, "implicit");
+        assert.equal((error as SessionError).context?.thread, p.root.thread); return true;
+      });
+    } else {
+      const old = p.right.prepare(p.a.id, "Still the old work", p.root.id);
+      assert.equal(old.hop, 7); assert.deepEqual(old.work, p.root.work); assert.equal(old.expiresAt, 605_000);
+      assert.throws(() => p.right.prepare(p.a.id, "Exhausted old anchor", p.root.id), code("HOP_LIMIT"));
+      assert.throws(() => p.right.prepare(p.a.id, "Implicit old task"), code("HOP_LIMIT"));
+    }
+    // Switching targets changes neither thread's high-water nor the implicit boundary.
+    const second = p.right.prepare(from.id, "Second fresh result", fresh.id);
+    assert.equal(second.hop, 2); assert.deepEqual(second.work, fresh.work); assert.equal(second.thread, fresh.thread);
+  });
+}
+
+test("ordinary exact replies use only their own hop/deadline, even after another ordinary thread commits", () => {
+  const from = peer(), box = new Mailbox(() => 1000);
+  const old = { id: newId(), thread: newId(), hop: 0, expiresAt: 601_000, text: "First ordinary task" };
+  const newer = { ...old, id: newId(), thread: newId(), hop: 7, expiresAt: 50_000 };
+  box.accept(from, old); box.delivered(old.id); box.accept(from, newer); box.delivered(newer.id);
+  const reply = box.prepare(from.id, "Old exact answer", old.id);
+  assert.equal(reply.hop, 1); assert.equal(reply.expiresAt, 601_000); assert.equal(reply.thread, old.thread);
+  assert.throws(() => box.prepare(from.id, "New exhausted answer", newer.id), code("HOP_LIMIT"));
+  assert.throws(() => box.prepare(from.id, "Implicit exhausted answer"), code("HOP_LIMIT"));
+  // Uncorrelated ordinary traffic cannot extend a retained ordinary deadline either.
+  assert.throws(() => box.accept(from, { ...old, id: newId(), expiresAt: 601_001 }), code("INVALID_LIFETIME"));
+  assert.throws(() => box.accept(from, { ...newer, id: newId(), expiresAt: 50_001 }), code("CONTEXT_MISMATCH"));
+});
+
+test("independent traffic preserves work peer/metadata/replay guards and retained high-water after genuine input", () => {
+  const p = pair(), from = peer(), source = new Mailbox(() => 1000); source.humanInput();
+  const fresh = source.prepare(p.b.id, "Independent work", undefined, {});
+  p.right.accept(from, fresh); p.right.delivered(fresh.id);
+  const reply = p.right.prepare(from.id, "Fresh result", fresh.id);
+  assert.throws(() => p.right.accept(from, { ...fresh, id: newId(), hop: 2, work: { ...fresh.work!, deadline: fresh.work!.deadline + 1 } }), code("CONTEXT_MISMATCH"));
+  const { work: _work, ...downgraded } = fresh;
+  assert.throws(() => p.right.accept(from, { ...downgraded, id: newId(), hop: 2 }), code("CONTEXT_MISMATCH"));
+  assert.throws(() => p.right.accept(p.a, { ...fresh, id: newId(), replyTo: reply.id, hop: 2 }), code("CONTEXT_MISMATCH"));
+  assert.equal(p.right.accept(from, fresh), "duplicate");
+  assert.equal(p.right.prepare(from.id, "No replay reset", fresh.id).hop, 2);
+  // A human reset permits a new root, but cannot erase a retained thread's causal maximum.
+  p.right.humanInput(); assert.equal(p.right.prepare(from.id, "Retained explicit result", fresh.id).hop, 3);
+});
+
+test("thread index stays bounded with history, and expiry pruning preserves only the implicit sentinel", () => {
+  let now = 1000;
+  const box = new Mailbox(() => now), from = peer(), internals = box as any;
+  for (let i = 0; i < 64; i++) { box.humanInput(); box.prepare(from.id, "Independent authorized root", undefined, {}); }
+  assert.equal(internals.history.size, 64); assert.equal(internals.threads.size, 64);
+  for (const value of internals.threads.values()) assert.equal(value.text, undefined, "the index must not copy message bodies");
+  now = 601_000; assert.equal(box.pending, 0); assert.equal(internals.threads.size, 64);
+  now = 1_801_000; assert.equal(box.pending, 0); assert.equal(internals.history.size, 0); assert.equal(internals.threads.size, 0);
+  assert.equal(internals.implicit.retained, 0); assert.equal(internals.implicit.text, undefined);
+  assert.throws(() => box.prepare(from.id, "No automatic fresh root"), code("WORK_EXPIRED"));
+  box.humanInput(); assert.equal(box.prepare(from.id, "Genuinely new root", undefined, {}).hop, 0);
+  assert.equal(internals.history.size, 1); assert.equal(internals.threads.size, 1);
+});
+
+test("hot mailbox lookups do not rescan history before the next expiry; clocks are not benchmarked", (t) => {
+  let now = 1000;
+  const box = new Mailbox(() => now), source = new Mailbox(() => now), from = peer(); source.humanInput();
+  const root = source.prepare(from.id, "Work", undefined, {}); box.accept(from, root); box.delivered(root.id);
+  const history = (box as any).history as Map<string, unknown>, iterate = history[Symbol.iterator].bind(history);
+  let scans = 0;
+  t.mock.method(history, Symbol.iterator, () => { scans++; return iterate(); });
+  t.mock.method(history, "values", () => { throw new Error("No linear metadata/hop scan on a send or admission"); });
+  for (let i = 0; i < 4; i++) {
+    const next = { id: newId(), thread: newId(), hop: 0, text: "Independent ordinary", expiresAt: 601_000 };
+    box.accept(from, next); assert.equal(box.next()?.message.id, next.id); assert.equal(box.pending, 1);
+    box.delivered(next.id); assert.equal(box.prepare(from.id, "Exact result", next.id).hop, 1);
+  }
+  assert.equal(scans, 0);
+  now = 601_000; assert.equal(box.pending, 0); assert.equal(scans, 1);
+  for (let i = 0; i < 4; i++) assert.equal(box.pending, 0);
+  assert.equal(scans, 1, "unchanged post-prune reads do not rescan");
+  assert.equal(box.prepare(from.id, "Work anchor survived TTL", root.id).hop, 1);
+  now = 1_801_000; assert.equal(box.pending, 0); assert.equal(scans, 2);
 });
 
 test("work admission does not reset automatic send or receive budgets", () => {

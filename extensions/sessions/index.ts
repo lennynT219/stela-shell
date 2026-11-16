@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
-import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, SessionError, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
+import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, sendContext, SessionError, type Envelope, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
 import type { OpenTransport, SessionTransport } from "./protocol.ts";
 
@@ -29,6 +29,8 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   let owner: ExtensionContext | undefined, ownerId: string | undefined, transport: SessionTransport | undefined;
   let mailbox = new Mailbox(), generation = 0, startup: AbortController | undefined;
   let inFlight: string | undefined, paused = false, disabled = false, unavailable = "Session has not started.";
+  let ackMiss: { generation: number; activation: string; messageId: string; leafId: string | null } | undefined;
+  const flight = (id?: string) => { inFlight = id; ackMiss = undefined; if (id === undefined) mailbox.withdraw(); };
 
   const owns = (ctx: ExtensionContext) => owner?.sessionManager === ctx.sessionManager && ownerId === ctx.sessionManager.getSessionId();
   const widget = () => {
@@ -37,12 +39,20 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   };
   const acknowledge = (ctx: ExtensionContext) => {
     if (!inFlight || !transport || !owns(ctx)) return;
-    const id = inFlight;
-    if (ctx.sessionManager.getBranch().some((entry) => entry.type === "custom_message" && entry.customType === MESSAGE_TYPE &&
-      (entry.details as { activation?: string; messageId?: string } | undefined)?.activation === transport!.info.id &&
-      (entry.details as { messageId?: string } | undefined)?.messageId === id)) {
-      mailbox.delivered(id); inFlight = undefined; widget();
-    }
+    const id = inFlight, activation = transport.info.id, leafId = ctx.sessionManager.getLeafId();
+    if (ackMiss?.generation === generation && ackMiss.activation === activation && ackMiss.messageId === id && ackMiss.leafId === leafId) return;
+    const matches = (entry: ReturnType<typeof ctx.sessionManager.getLeafEntry>) => entry?.type === "custom_message" && entry.customType === MESSAGE_TYPE &&
+      (entry.details as { activation?: string; messageId?: string } | undefined)?.activation === activation &&
+      (entry.details as { messageId?: string } | undefined)?.messageId === id;
+    // Only stored active-branch evidence counts. No public committed-entry event/receipt is assumed.
+    if (matches(ctx.sessionManager.getLeafEntry()) || ctx.sessionManager.getBranch().some(matches)) {
+      const committed = mailbox.delivered(id); flight();
+      if (!committed) {
+        paused = true; // A correlation failure must never silently open a new automatic root.
+        try { if (ctx.hasUI) ctx.ui.notify("No se pudo confirmar el contexto del mensaje. Sesiones en pausa hasta intervención del usuario.", "warning"); } catch { /* best-effort presentation */ }
+      }
+      widget();
+    } else ackMiss = { generation, activation, messageId: id, leafId }; // One bounded negative-cache slot.
   };
   const draft = (received: Received) => ({
     customType: MESSAGE_TYPE, content: formatMessage(received), display: true,
@@ -51,9 +61,9 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   });
   const pump = (version = generation) => {
     if (version !== generation || !transport || !owner || !owns(owner) || paused || inFlight || !owner.isIdle()) return;
-    const next = mailbox.next(); widget();
+    const next = mailbox.offer(); widget();
     if (!next) return;
-    inFlight = next.message.id;
+    flight(next.message.id);
     try {
       // Never sendUserMessage: peer text is visibly custom context, not a user prompt/command.
       // Busy sessions retain their bounded inbox until an actionable boundary.
@@ -69,7 +79,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     const old = transport; transport = undefined;
     try { if (owner?.hasUI) owner.ui.setWidget(WIDGET, undefined); } catch { /* teardown must continue */ }
     owner = undefined; ownerId = undefined;
-    inFlight = undefined; mailbox = new Mailbox();
+    flight(); mailbox = new Mailbox();
     await old?.close();
   };
   const start = async (_event: unknown, ctx: ExtensionContext) => {
@@ -101,10 +111,10 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   const append = (event: { outcome: string; entries: any[] }, ctx: ExtensionContext) => {
     if (!transport || !owns(ctx) || paused || event.outcome !== "completed") return;
     acknowledge(ctx);
-    if (inFlight) return;
-    const next = mailbox.next(); widget();
+    if (paused || inFlight) return;
+    const next = mailbox.offer(); widget();
     if (!next) return;
-    inFlight = next.message.id;
+    flight(next.message.id);
     // A proposal is not delivery. Only a committed active-branch entry acknowledges it.
     return { entries: [...event.entries, { type: "custom_message" as const, ...draft(next) }], continue: true };
   };
@@ -131,7 +141,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     acknowledge(ctx);
     if (event.aborted || inFlight) {
       // Respect interruption; no automatic restart or blind re-proposal after failed commitment.
-      paused = true; inFlight = undefined; widget();
+      paused = true; flight(); widget();
       return;
     }
     pump();
@@ -163,7 +173,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
       `For ss_sessions_send collaboration: ${PEER_TASK_POLICY}`,
       `When handling ss_sessions_send work: ${PEER_TASK_BOUNDARIES}`,
       "Use ss_sessions_send for useful coordination and concrete delegated tasks. Do not copy secrets or whole conversations or transfer tool permissions.",
-      "Use ss_sessions_send with exact activation IDs from ss_sessions_list or an incoming peer message. For a reply, supply its message ID as reply_to. Delivery/response may start model turns automatically. A receipt only means accepted into memory, not read, verified or completed work.",
+      "Use ss_sessions_send with exact activation IDs from ss_sessions_list or an incoming peer message. For a reply, supply its exact message ID as reply_to; it selects that thread's deadline and hop, not the implicit context or latest activity from that peer. Missing/expired targets never fall back. Omitted reply_to keeps implicit lineage; an unrelated reply cannot renew or replace it. Delivery/response may start model turns automatically. A receipt only means accepted into memory, not read, verified or completed work.",
       "For ss_sessions_send, select work:{} (30 minutes) or work:{timeout_seconds:600..3600} only at a fresh human-originated root when a longer bounded communication window is useful. Replies inherit work automatically: omit work. Each message still expires within 10 minutes. No renewal, automatic upgrade/downgrade, expired-thread migration, task-runtime/cost guarantee or budget reset. Unsupported peers receive no assignment text and there is no fallback.",
       "After ss_sessions_send, continue independent work. If a reply is needed and nothing else remains, state it is pending; do not poll, sleep, repeatedly ask, or resend because an ACK/reply is missing. No automatic unavailable/acknowledgment replies or echo loops. Stop when the exchange is complete or a budget is reached.",
     ],
@@ -180,19 +190,22 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
       if (paused) throw new Error("Messaging is paused after interruption/injection failure; human input or /ss-sessions on is required.");
       const { to, text, reply_to, work } = params as { to: string; text: string; reply_to?: string; work?: WorkOptions };
       if (to === current.info.id) throw new Error("Cannot message this activation itself.");
+      let message: Envelope | undefined;
       try {
-        const message = mailbox.prepare(to, text, reply_to, work);
+        message = mailbox.prepare(to, text, reply_to, work);
         const receipt = await current.send(to, message, signal);
         if (version !== generation || transport !== current || !owns(ctx)) throw new SessionError("DELIVERY_UNCONFIRMED", "Session changed; message delivery is unconfirmed. Do not retry automatically.");
         if (!receipt.accepted) {
           if (receipt.code) throw new SessionError(receipt.code, receipt.error ?? "Recipient rejected the message.");
           throw new Error(receipt.error ?? "Recipient rejected the message.");
         }
-        return result(`Accepted for delivery: ${message.id} to ${to}. Not a read/completion receipt. Replies arrive automatically; continue independent work or honestly report a pending reply.`,
-          { messageId: message.id, to, thread: message.thread, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false, ...(message.work ? { work: message.work } : {}) });
+        const context = sendContext(message, reply_to !== undefined ? "reply_to" : message.hop === 0 ? "root" : "implicit");
+        return result(`Accepted for delivery: ${message.id} to ${to}. Thread: ${message.thread}; hop: ${message.hop + 1}/${MAX_HOPS}; message expiry (Unix ms): ${message.expiresAt}${message.work ? `; fixed work deadline: ${message.work.deadline}` : ""}. Not a read/completion receipt. Replies arrive automatically; continue independent work or honestly report a pending reply.`,
+          { messageId: message.id, to, ...context, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false });
       } catch (error) {
         if (!(error instanceof SessionError)) throw error;
-        return { ...result(error.message, { code: error.code, status: "error" }), isError: true };
+        const context = error.context ?? (message ? sendContext(message, reply_to !== undefined ? "reply_to" : message.hop === 0 ? "root" : "implicit") : undefined);
+        return { ...result(error.message, { code: error.code, status: "error", stage: message ? "transport" : "admission", ...(context ? { context } : {}) }), isError: true };
       }
     },
   });
