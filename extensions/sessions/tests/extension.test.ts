@@ -330,15 +330,17 @@ test("uncommitted interrupted proposal is cancelled without automatic re-proposa
   await h.emit("session_shutdown");
 });
 
-test("package retains session coverage and integrates only the approved owned web extension/dependencies", () => {
+test("package retains session coverage and owned extensions with the configured Memory entry point and unchanged dependencies", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
   assert.deepEqual(manifest.pi.extensions, [
     "./extensions/method/index.ts",
     "./extensions/subagents/index.ts",
     "./extensions/sessions/index.ts",
     "./extensions/web/index.ts",
+    "./extensions/memory/index.ts",
   ]);
   assert.match(manifest.scripts.test, /extensions\/sessions\/tests\/\*\.test\.ts/);
   assert.match(manifest.scripts.test, /extensions\/web\/tests\/\*\.test\.ts/);
+  assert.match(manifest.scripts.test, /extensions\/memory\/tests\/\*\.test\.ts/);
   assert.deepEqual(manifest.dependencies, { "@mozilla/readability": "0.6.0", linkedom: "0.16.11", turndown: "7.2.5" });
 });

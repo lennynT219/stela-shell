@@ -1,6 +1,63 @@
 # Brain Memory technical plan
 
-Status: Brain R1/R2/R3 CLOSED within reviewed scope on final .N9bkmy/dd9da947... (98 logged tests, four matching-BIN oracles, parent8/8 exact-byte CLI replay). No code/result/helper pending. Acceptance reply to6690... failed CONTEXT_MISMATCH, not delivered/retried; not a code-proof blocker. Core remains local/uncommitted, Cargo frozen, Brain sole writer. SS runtime/cutover/installer/live activation and Brain-repository Git are separate proposals. The user separately authorized this StelaShell documentation's commit/push, not Brain-source publication or SS adapter implementation. Contract: [BRAIN_MEMORY_CONTRACT.md](BRAIN_MEMORY_CONTRACT.md); continuity: [WORK_STATE.md](WORK_STATE.md).
+Status: Brain R1/R2/R3 CLOSED within reviewed scope on final .N9bkmy/dd9da947... (98 logged tests, four matching-BIN oracles, parent8/8 exact-byte CLI replay). No code/result/helper pending. Acceptance reply to6690... failed CONTEXT_MISMATCH, not delivered/retried; not a code-proof blocker. Core remains local/uncommitted, Cargo frozen, Brain sole writer. SS pre-final runtime/tools exist locally with isolated checks and a separately authorized actual-provider/public-RPC trial in the Brain repository: normal profile/default model, create/fresh-session recall/same-identity update passed, with a later ordinary provenance correction. No integration code fix was needed. Permanent activation/cutover/installer and Brain-repository Git remain separate. Earlier documentation delivery is fulfilled; the human now explicitly authorizes SS Memory commit/push, without Brain Git, installation/activation or new functional runs. Contract: [BRAIN_MEMORY_CONTRACT.md](BRAIN_MEMORY_CONTRACT.md); continuity: [WORK_STATE.md](WORK_STATE.md).
+
+**Historical SS checkpoint, before 05 naming and executable discovery:**41 focused Memory passes; final integrated281pass/24Windows-only-skip/0fail/305total. Includes15 deterministic actual Pi+accepted-Brain cases. New runtime is implemented locally and its bounded normal-profile/real-model trial passed; it is not permanently activated/migrated. Both client/runtime independent source reviews timed out without an answer and remain incomplete. Current receipt and limits: [WORK_STATE](WORK_STATE.md).
+
+## SS Memory activation — no startup flags
+
+The human explicitly removed every Memory flag and selected extension loading as
+authorization for ordinary read/save use. Executable selection is nonblank
+BRAIN_BIN or brain from PATH. Brain's own existing configuration selects the vault;
+the host opts into that backend mode instead of parsing TOML or requiring a
+duplicate vault parameter. The opened cwd is the internal boundary; no enclosing
+project/parent/root is implicitly searched. Normal Pi tool controls remain, and
+exceptional manual acceptance/replacement still needs actual exact-byte UI approval.
+
+The executable/environment are owned per context. A lazy metadata-only guard
+observes Brain's platform-specific config pathname before/after access and rejects
+observed drift for the old owner. It does not parse/read config content or create
+it. If drift is observed after a saved receipt, publication remains acknowledged,
+read-back is unavailable and future writes are fenced across owners until explicit
+complete read reconciliation. No retry, rollback, automatic initialization,
+installer/profile activation or WORK_STATE cutover follows from extension loading.
+
+Backend source helper359a9021 returned PARTIAL evidence: exact config/env rules and
+the client's existing allowConfiguredVault opt-in are established, but store-level
+vault-identity payloads were outside its references. No atomic vault pinning is
+claimed: transient edits, metadata collisions, symlink/ancestor retargeting and
+config-load races remain limitations. Narrow source reviewc15aca89 completed and found detected config drift during
+read-back could escape the shared fence. Parent corrected state.ts to apply scope
+annotation/fencing both before and after read-back without losing the acknowledged
+receipt or retrying writes. The final correction has parent source inspection and
+prepared regression source only, not executed or independently reassessed. Old review02b11c79
+covered the superseded CLI-override source only; broader client/runtime reviews
+remain incomplete. Adapted/new regression sources are prepared but NOT executed.
+User still forbids assistant-run labs/tests/Brain/Pi/provider runs. Brain source,
+profile links, installed binary/configuration and dependencies are unchanged.
+See [configuration and limits](../extensions/memory/README.md).
+
+## Canonical area rename — code complete, no further trial authorized
+
+The later human-requested spelling is `05-memorias/`, not `Memorias/`. Brain's
+naming-only source/tests/docs unit is complete in
+`/tmp/brain-memory-05-rename.b3CiQN`, binary SHA256
+`466420652fcdc28b09fb4530018a2c0ba084d78ce1ab8c66a12e54728ed0060b`.
+Observed checks:101 tests (independently expected98+3), clippy/fmt/build offline;
+parent verified30 manifest entries,20 preserved old inputs and7 inverse hashes
+establishing existing Rust changes are name/format-only. No repeated parent suite
+or external old-name oracles. SS's two path-dependent test files/docs now use the
+new spelling, with production client/state/entry point unchanged at that naming
+checkpoint; the later SS-only executable-selection change is separate above.
+No subsequent SS functional suite or live-model run was launched. The human
+subsequently rejected labs/tests, superseding the earlier manual-trial plan.
+
+No migration was added/applied. The previous revision3 Memory/binding/history
+remain at the old path, paired with the old binary. Pure directory/header moves
+cannot safely convert accepted snapshots; `not_found` from the new layout does
+not establish absence under the old area. Do not invoke `replace_missing`, rewrite
+accepted history, delete old data or copy that binding into a new context.
+No new context/vault, global setup, migration or publication is authorized.
 
 ## Completion boundary and ownership
 
@@ -13,9 +70,9 @@ Completed Brain R1 unit covers source/tests/docs and isolated synthetic checks, 
 
 - A fourth `Memory` model represents persistent work context, not an individual fact/message. Project association is optional; preserve Note/Project/Task semantics and existing init/config.
 - Working-folder `.brain.toml`: `binding_version = 1`, `memory_id`, optional explicit relative `memory_subfolders`. No vault path, content/history, Project, executable or permissions in the marker.
-- Vault layout: `Memorias/<memory-uuid>/Memoria.md` and `Historial.md`; marker UUID, directory UUID and current `brain_id` must agree. No catalog, ordinary index Note, task index or automatic Project. UUID is identity/locator, not authority.
+- Vault layout: `05-memorias/<memory-uuid>/Memoria.md` and `Historial.md`; marker UUID, directory UUID and current `brain_id` must agree. No catalog, ordinary index Note, task index or automatic Project. UUID is identity/locator, not authority.
 - Only an own marker or explicit parent declaration creates an independent child context. Materialize that child's marker upon actual creation; do not eagerly create declared children. Copies/moves keep the same Memory identity.
-- Resolve/read existing Memory at the first genuine human prompt, before work. Create a new Memory and marker only after the first useful successfully completed turn, after the response has finished; SS then reports actual save success/failure itself. Startup, greetings, empty, failed and cancelled turns create nothing. Subsequent meaningful changes update the same Memory.
+- Resolve/read existing Memory at the first genuine human prompt, before work. Create a new Memory and marker only for useful authorized work, through an ordinary save tool with actual confirmation BEFORE the final user reply, following the explicitly adopted Gentle/WORK_STATE order. Startup, greetings and empty interactions do not create Memory automatically; cancellation before submission creates nothing. Later response failure/cancellation does not undo a confirmed save. Subsequent meaningful changes update the same Memory.
 - Current body has exactly the five WORK_STATE sections, in their existing order. Keep current Markdown and separate history; retain complete accepted document versions, including exact last-accepted bytes. Do not capture prompts, drafts or full transcripts.
 - Preserve unknown/manual Markdown material and observed bytes; human approval is required before accepting external edits. Missing history, incomplete publication and genuinely missing Memory are different states. No silent overwrite, merge, repair, identity replacement or retry.
 - Cooperating writers coordinate publication and validate expected revision and accepted bytes. Session messages agree order, not locks or permissions. No reasoning-turn lock, automatic stale-lock stealing, universal CAS, multi-file transaction or power-loss guarantee.
@@ -96,6 +153,12 @@ Evidence /tmp/ss-brain-chain-review-qm3lmtfq/{source-review.json,masking-interac
 
 Communication limitation, NOT a code blocker: Brain reports root32f4... reply returned WORK_EXPIRED; actual handoff6690... arrived after its own human-requested resend in newbe5d... thread. Parent attempted a substantive acceptance reply to incoming6690... WITHOUT work override; observed CONTEXT_MISMATCH: Reply cannot replace, upgrade or downgrade the active work context. It was NOT delivered and was NOT retried/renewed/migrated or routed through another anchor/session/helper/file channel. Brain receipt of parent acceptance is unconfirmed; parent scoped technical closure/evidence remains valid. Any further communication must respect a legitimately available authorized context, not automatic workaround. No new protected approval follows from peer messages.
 
+## Isolated SS client — resumed first unit
+
+The human resumed Memory after communication publication/manual refresh. The first local unit implements extensions/memory/{client,protocol}.ts and deterministic/opt-in real-Brain tests:11 focused passes; integrated251pass/24Windows-only-skip/0fail (275total). That checkpoint established only the client, without a Pi entry point/tool/hook/registration; the later bounded pre-final runtime below adds those, not automatic/permanent activation or cutover. A subsequent separately authorized bounded actual-provider/RPC trial is recorded in the current status above. Independent client review dac6c276 timed out180s without an answer, INCOMPLETE/not pending/not retried; parent tests do not replace it. Parent owns these SS files; Brain remains read-only and its accepted core/Cargo is not reopened. Current checks/review state and limitations: docs/WORK_STATE.md; actual interface: extensions/memory/README.md.
+
+Direct absolute trusted executable, one child/no queue, explicit selected vault (or host opt-in to existing configuration), minimal env, bounded EOF stdio and monotonic10s deadline; no probe/init/build/download/retry. Full u64 values use source-aware JSON plus rawJSON rather than rounded JavaScript numbers. Mutation transport ambiguity is save_unconfirmed, never assumed saved or rolled back. Exact response schemas were checked against the imported store/binding types after the transport helper identified missing-reference limitations. No live Memory access, runtime persistence, installer/profile change, authority migration or new commit/push is included. The human has now authorized the next SS-owned lifecycle/permission/manual-approval/status unit with isolated Pi tests, excluding real-vault/profile activation, installer work and WORK_STATE cutover. The human replaced the blocked post-response design with pre-final normal-tool publication; the owned runtime unit below now implements it without a Pi patch. The transport library alone is not the permission/lifecycle layer.
+
 ## Proposed SS adapter boundary
 
 Use a trusted, explicitly configured compatible Brain executable, launched directly with argument arrays and `shell: false`. Brain parses TOML and owns Memory/history interpretation and publication. SS owns host authority, selected context, model exposure, lifecycle and presentation. No initial daemon, HTTP/TCP server, MCP server, secondary model, direct vault manipulation or duplicate TOML/YAML parser in SS.
@@ -127,23 +190,35 @@ A deadline/disconnection after mutation may mean publication happened: report `s
 Use an owned session/generation and actual input origin, not merely `messageType: "user"`. Current sessions code recognizes owned `input` sources `interactive`/`rpc`; extension-generated user messages, helpers and visibly custom peer messages are not fresh human roots. Apply the same distinction without changing sessions transport or budgets.
 
 - Exclude helpers before any Memory startup, context lookup, tools, marker creation or process launch. Their reference-scoped readers remain unchanged.
-- Startup only registers inactive lifecycle state; no Memory/marker creation. On first eligible human prompt, resolve read-only before task work and deliver the selected current state as recalled project data, not overriding instructions or authorization.
+- Startup registers tool declarations and configured transient lifecycle state only; no process/lookup/Memory/marker creation. Unconfigured tools refuse execution. On first eligible human prompt, resolve read-only before task work and deliver the selected current state as recalled project data, not overriding instructions or authorization.
 - Keep scope in trusted host state. An ordinary model call must not supply executable, vault, arbitrary folder, personal-note path or another Memory ID.
 - After compaction/relevant navigation, invalidate stale cached context and refresh the same authorized binding before using it. Navigation/reload/shutdown discards owner-bound pending candidates/approvals and cancels owned subprocesses; it does not delete or revert Brain state.
 - Peer-triggered work can use the receiver's authorized capabilities, but cannot manufacture first-use human eligibility or human manual-edit approval. Later update integration must retain the same storage conflict guards.
 - Do not turn one helper result, model/tool iteration, retry or peer message into an independent Memory. An empty or failed persistence attempt is not a successful durable update.
 
-### Successful-turn persistence: confirmed policy, proposed mechanism
+### Pre-final publication — adopted and implemented locally
 
-Pi 1.5.2's documented `agent_end` is a low-level-run boundary; retries, recovery, compaction or queued continuations can follow. `agent_before_settle` is actionable but may still request continuation and can be interrupted. `agent_settled` is final and carries `aborted`, but does not itself carry `completed` versus `error`; a non-aborted event alone is insufficient success evidence.
+The human explicitly chose Gentle/WORK_STATE order: prepare useful authorized state, publish and observe the actual result through ordinary Memory tools, THEN send the final user response. This replaces the former post-response settlement proposal and resolves that design blocker without modifying Pi. No hidden summarizer, extra finalization model turn, delayed mutation or completed-tool-context replay.
 
-A possible design is an explicitly write-authorized, owner-bound in-memory candidate prepared by the existing primary agent, then a bounded host publication only after successful final settlement. An illustrative tool name is `ss_memory_stage` (visible label `Preparar memoria`); it would mean **prepared, not saved**, not persist a draft to history and not call a hidden summarizing model. The admission must pass write permission/tool hooks; denied or revoked work must never be committed later through an out-of-band subprocess. No staged candidate means no guessed update or extra model call. Exact tool/command registration is not selected yet.
+Local implementation: extensions/memory/index.ts + state.ts register ss_memory_read (Leer memoria) and ss_memory_save (Guardar memoria), with normal Pi tool hooks. Extension loading authorizes ordinary use with no startup flags. BRAIN_BIN or brain from PATH resolves once per owner; Brain's existing configuration owns vault selection, and cwd is the internal boundary. Startup may inspect executable metadata, never run Brain or create Memory; config metadata is captured lazily on first genuine read. Genuine interactive/RPC input enables scoped read-only resolve before work; helper exclusion precedes tools/lifecycle/resources. Recalled complete accepted Markdown is ephemeral untrusted provider context, not another canonical store. Models cannot supply scope, identity, expected revision/bytes or approval booleans.
 
-**Confirmed future policy:** the user approved Memory-only publication after successful response completion, followed by an SS-owned visible saved/failed/pending result. The agent may prepare an authorized candidate during the turn, but must not claim preparation is a confirmed save. Failed/aborted/empty/greeting interactions create no new Memory; `aborted: false` alone is not success evidence. A useful completed interaction may report a task blocker: interaction completion is distinct from every requested task/check succeeding.
+The primary, as with WORK_STATE, decides whether meaningful durable state changed; there is no hidden semantic classifier. An ordinary save revalidates the same binding and exact baseline, publishes once through Brain and attempts identity/revision read-back. Existing updates take a complete body without YAML; Brain owns all Markdown/frontmatter/history interpretation. Changed bindings/manual bytes require explicit refresh/review, never baseline substitution, merge or identity allocation. No lifecycle hook creates or saves Memory.
 
-This narrow future Memory policy does not change the actual WORK_STATE workflow or authorize post-response work in this session. Existing FARO/method pre-final-save rules remain in force until the separately authorized implementation/cutover explicitly encodes the Memory-only distinction. Hook composition, success evidence, permissions and actual confirmation still require implementation and isolated verification; the approved policy is not a claim that a hook already solves those mechanics. No source/dependency/profile/migration authorization is inferred.
+Manual acceptance requires actual UI approval of exact observed/candidate bytes and revalidation after the dialog. Missing-reference replacement obtains raw marker bytes from Brain inspect_recovery, verifies no partial artifacts, displays the exact old identity/marker/proposed context for actual UI approval, rechecks, then invokes replace_missing. No SS marker parser/file manipulation; without UI approval these operations stay pending.
 
-The eventual design must also handle multiple human inputs/steering, continuations proposed by other extensions, late cancellation, lifecycle generation changes and failures after publication. Do not introduce another provider request merely to finalize Memory. All this requires isolated lifecycle evidence before real activation.
+Input/steering, compaction and navigation cancel/invalidate stale state; new owners require genuine input. Failed automatic lookup is not repeatedly retried by context hooks. Denied tools/default read-only mode/pre-submission cancellation create nothing. A lost mutation receipt is save_unconfirmed and fences writes across owner changes; automatic reads do not clear it. Only an explicit read of a complete found binding can reconcile current state for future work, not retroactively confirm the old receipt. Once a valid receipt exists, later read-back/response cancellation cannot undo or relabel that save.
+
+Current observed new evidence:15 state/extension tests and15 deterministic actual Pi+accepted-Brain cases pass. Native cases cover pre-final create/update/no-op, greeting/startup, deny/read-only/disabled/helper/abort, stale manual change, actual yes/no UI approval for edits/missing references, new session, continuation, steering, abort after saved and actual receipt loss. Compaction invalidation is fake-host evidence, not an actual compaction/provider-overflow matrix. Integrated suite/closure counts are recorded in WORK_STATE after verification.
+
+New runtime review task-9f7256c6-d393-4c22-abfe-31a692b161cd FAILED180s without an answer; no approval, finding or retry. All four refs matched the frozen snapshot through timeout; later parent-only feedback/state/receipt/cache/owner corrections and tests are not independently assessed. Prior client review remains separately incomplete. Initial lookup generic-error retry and a native fixture's incorrect rejection of nonblocking setStatus events were corrected without weakening write guards. Parent then reproduced two stale-input regressions: late cancellation/confirmed-receipt completion could overwrite the next input's required lookup state. Final guards preserve newer state while retaining a confirmed receipt or activation-wide uncertainty fence. Parent also reproduced cached-data delivery after reader/configuration revocation and overlapping navigation bypassing an outstanding close; final guards recheck delivery authority, capture configuration and share the close barrier. Explicit read receipts now contain only metadata, with full Markdown delivered ephemerally. These corrections have parent regression evidence, not a completed independent assessment.
+
+### Retired post-response dispatch question — not a current blocker
+
+Pi1.5.2 agent_end is not final, agent_before_settle may continue, and agent_settled is notification-only and lacks a completed/error outcome. Source helper def624ea correctly established that captured executeTool is not a documented post-parent-lifetime executor and loses normal parent recording/cancellation semantics. That finding still applies to the retired design, but no longer requires a product decision or a Pi host patch. Current writes are normal awaited tools before the final reply. Keep Pi source/installed SDK unmodified.
+
+#### Gentle reference and evidence limits
+
+Clean local gentle-pi4.7.0 main@3c2773a4d451b4162d3049fe4135f22041449fb5 uses the optional gentle-engram companion. Helper5ad5be58 provided PARTIAL policy/test evidence: local progress first, Engram mirror on meaningful transitions/changes and at close; no independent final-order/runtime proof from those four refs. Parent read the public [provider protocol](https://raw.githubusercontent.com/Gentleman-Programming/engram/main/plugin/pi/index.ts), whose DELIVERY GUARANTEE explicitly requires memory work before composing the completed-task reply, with no later tool calls. Eligible non-Engram outputs may yield structured passive learnings; final assistant responses are explicitly not automatically captured. The [manifest](https://raw.githubusercontent.com/Gentleman-Programming/engram/main/plugin/pi/package.json) self-declares0.8.0 on mutable main; published/loaded version is unknown. Extraction was partial, but cited paragraphs were complete; no Gentle live session/store was exercised. The human adopted the pre-final ordering, not Engram, a permanent local/Memory mirror or a host fork.
 
 ### Exceptional states and user-visible behavior
 
@@ -153,28 +228,29 @@ The eventual design must also handle multiple human inputs/steering, continuatio
 - Partial/unconfirmed publication: report what is known and unknown; leave normal SS usable. A failed Brain call must not silently synchronize into WORK_STATE or create another canonical record.
 - Saved: show the actual returned identity/revision only after confirmed acceptance. Use short Spanish product headings and English protocol/agent text, reusing `extensions/presentation.ts`.
 
-## Proposed SS file scope — not authorization to edit
+## SS file scope and remaining boundaries
 
 | Path | Responsibility |
 | --- | --- |
-| `extensions/memory/index.ts` (new) | Primary-only registration, owned lifecycle, permissions, selected context delivery, short Spanish status/tool/command presentation. |
-| `extensions/memory/client.ts` (new) | Direct executable launch, bounded/cancellable stdio, strict version/correlation/result validation; no Memory-file reads/writes. |
-| `extensions/memory/state.ts` (new if separation is useful) | Human-root/generation/binding/candidate/approval state machine; never a second durable store. May stay in index if small. |
-| `extensions/memory/README.md` (new) | Actual interface, consent/trust/lifecycle, outcomes and non-guarantees alongside implementation. |
-| `extensions/memory/tests/` (new) | Client/state/registration tests and deterministic temporary CLI/Pi fixtures. Exact coherent suites follow the finalized contract; no fixed test-count target. |
-| `package.json` (later modify) | Register the owned extension and its meaningful tests under existing Node/Pi tooling; no new npm dependency currently proposed. |
-| `extensions/method/index.ts`, `extensions/method/assets/method.md` (separate cutover scope) | Select one continuity authority/recovery path only after Brain integration and implementation/verification of the approved Memory-only settlement policy; preserve WORK_STATE behavior when Brain is declined/disabled. No duplicate FARO method or permanent dual writing. |
+| `extensions/memory/index.ts` (implemented locally) | Primary-only flag-free tools/lifecycle, extension-load authorization/current tool controls, cwd context and short Spanish status. |
+| `extensions/memory/client.ts` (isolated unit implemented) | Direct executable launch, bounded/cancellable stdio; no Memory-file reads/writes or Pi registration. |
+| `extensions/memory/protocol.ts` (isolated unit implemented) | Strict framing/version/correlation/typed results, lossless full u64 and bounded plain-JSON serialization; no Markdown/marker interpretation. |
+| `extensions/memory/state.ts` (implemented locally) | Human-root/generation/binding/baseline/actual-approval state and uncertainty fence; ordinary pre-final writes, never a second store. |
+| `extensions/memory/README.md` (updated) | Actual runtime/client configuration, scopes, limits, approval, pre-final outcomes and verification limitations. |
+| `extensions/memory/tests/` (extended) | Client/codec, executable resolution, state/entry-point and actual Pi/Brain regression sources. Observed old-layout checks and later unexecuted additions are distinguished above; opt-in binaries/disposable data only, no fixed count target. |
+| `package.json` (updated) | Retains the four existing entries and adds Memory; test script covers its suites. Dependencies unchanged. Existing manifest expectation extended without weakening its dependency/session/web checks. |
+| `extensions/method/index.ts`, `extensions/method/assets/method.md` (separate cutover scope) | Select one continuity authority/recovery path only after Brain integration and implementation/verification of the approved pre-final Memory policy; preserve WORK_STATE behavior when Brain is declined/disabled. No duplicate FARO method or permanent dual writing. |
 | `README.md`, product contract and work state (relevant stage only) | Reflect implemented behavior and remaining limitations, not merely planned capabilities. |
 
 Reuse presentation without changing helpers, sessions, web, native controllers, existing profiles or loading routes. New profile links/installer changes need separate applicable authorization, not a registration side effect. Keep the approved timing policy distinct from unapproved staging-tool/hook mechanics; implementation still needs its own authorized scope.
 
 ## Proposed checks and useful delivery outcomes
 
-These are acceptance plans, NOT checks run by this work.
+Brain core, isolated client and the new bounded pre-final runtime have observed checks recorded above/in WORK_STATE. Cutover/installer and broader lifecycle matrices remain acceptance plans, NOT activation or comprehensive certification.
 
 1. **Brain core/CLI:** temporary synthetic vault/folder fixtures covering the fourth model, parser preservation, full history and acceptance framing, lock/revision/byte checks, manual approval, child bindings/copies, concurrent creation, missing versus unavailable storage, and injected failures at publication boundaries. Preserve init/config/Note/Project/Task regressions. Initial file list, attributed dependency approval and reported commands are recorded in the verified handoff above; R1–R3 require focused follow-up coverage, not another generic planning round.
 2. **SS connector in isolation:** deterministic child executables for valid/invalid/version-mismatched JSON, wrong ID/correlation, missing binary, timeout, cancellation, oversized/truncated output, nonzero exit, safe diagnostics and uncertain saves. Verify no shell, implicit install/build/network, whole-vault access or retry.
-3. **Lifecycle and permissions integration:** deterministic Pi fixtures for first-human lookup before work, no startup/greeting/empty/failed/cancelled creation, no eager children, owner/generation invalidation, compaction recovery, retries versus true settlement, continuation ordering, helper exclusion and receiver write denial. Show that a denied candidate cannot later publish. Test reported save success separately from preparation. No paid-model/live-profile trial is implied.
+3. **Lifecycle and permissions integration:** deterministic Pi fixtures for first-human lookup before work, no automatic startup/greeting/empty creation, no eager children, pre-submission cancellation/denial, owner/generation invalidation, compaction recovery, continuation ordering, helper exclusion and write denial. Confirmed publication must survive later response cancellation. Show that a denied candidate cannot later publish. Test reported save success separately from preparation. No paid-model/live-profile trial is implied.
 4. **One-authority cutover:** a separate authorized outcome selecting Brain versus WORK_STATE, pre/post-compaction recovery and explicit unavailable-backend behavior. Only after functional proof and a deliberate migration may Brain replace the real operational record. Do not delete WORK_STATE or keep permanent synchronized canonical copies by default.
 5. **Optional installer:** later, separately authorized opt-in download/setup/version/integrity/selected-vault/loading-route flow; opt-out retains WORK_STATE. No current installer/dependency/profile permission.
 
@@ -182,11 +258,11 @@ Use coherent behavior boundaries rather than one task per file or a mandatory fu
 
 ## Source evidence and open decisions
 
-Parent inspected the current SS `main` with only design/continuity documents modified before this new plan; no source/package change was made. Relevant planning references:
+Original planning checkpoint: parent inspected SS `main` with only design/continuity documents modified; no source/package change existed THEN. The later isolated client/source and test-script changes are recorded above. Original planning references (line numbers may predate the communication correction):
 
 - `extensions/sessions/index.ts:24–26,120–143,212–216`: helper exclusion, owned genuine-input handling, actionable versus final lifecycle and custom peer injection.
 - `extensions/method/index.ts:22–42,63–75`: FARO injection, recovery after compaction/navigation, pre-final continuity-save requirement and no post-response work.
-- `package.json`: four current extensions, existing test runner and no Memory extension/Brain dependency.
+- `package.json` at original planning: four extensions and no Memory entry/Brain dependency. It now includes the fifth Memory entry and tests; no dependency was added.
 - Installed Pi package `@earendil-works/pi-coding-agent@1.5.2`, `docs/extensions.md:311–424,615–750,1112–1158,1231–1257` and `dist/core/extensions/types.d.ts:740–859`: lifecycle, origins, continuation/abort/result fields and signal limitations. These are selected planning excerpts, not an implementation-time full-doc/example review or runtime exercise.
 
-Pending outside completed Brain correction: no further code/result/helper is outstanding. Acceptance notice was not delivered because CONTEXT_MISMATCH; no automatic retry/renewal/alternate channel. SS client/lifecycle/host permission/manual approval/status, optional installer and single-authority migration remain separate proposals requiring applicable scope/authority. Existing approved Cargo and normal-Markdown decisions remain settled; no new package/toolchain/live/Git action.
+Pending outside completed Brain correction: no further Brain code/result/helper is outstanding. Acceptance notice was not delivered because CONTEXT_MISMATCH; no automatic retry/renewal/alternate channel. The isolated SS client remains functionally checked with its independent-review timeout explicitly incomplete. The SS lifecycle/permission/manual-approval/status unit is implemented locally and the separately authorized normal-profile/actual-provider RPC trial passed in the Brain test repository; keep Pi unmodified. Runtime source review9f7256c6 timed out180s without an answer and is incomplete, not pending/retried. The human explicitly selected pre-final normal-tool publication; that runtime exists and the earlier post-response executor question is retired. The bounded trial preserved one UUID through revisions1→2→3, including ordinary correction of controller-versus-human evidence attribution, with no integration code fix. Installer, permanent activation, private-data access and single-authority migration remain separate. Helper def624ea completed source evidence, not runtime verification; no helper is pending. Existing approved Cargo and normal-Markdown decisions remain settled; no further package/toolchain/live/Git action follows from completion.
