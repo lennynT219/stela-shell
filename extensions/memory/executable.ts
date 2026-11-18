@@ -10,15 +10,21 @@ export class ExecutableError extends Error {
   }
 }
 
+/** Windows root-/drive-relative names are not pinned to a complete location. */
+function validateCommand(command: string): void {
+  if (!command.trim() || command.includes("\0") || (!isAbsolute(command) && /[\\/]/.test(command)))
+    throw new ExecutableError("INVALID_EXECUTABLE");
+  if (process.platform === "win32" && (
+      /^[\\/](?![\\/])/.test(command) || /^[A-Za-z]:(?![\\/])/.test(command) ||
+      (isAbsolute(command) && !/\.exe$/i.test(command))))
+    throw new ExecutableError("INVALID_EXECUTABLE");
+}
+
 /** Loading Memory authorizes this host-owned selection; no CLI flags. */
 export function selectExecutable(environment: NodeJS.ProcessEnv): ExecutableSelection {
   const command = environment.BRAIN_BIN?.trim() ? environment.BRAIN_BIN : "brain";
-  if (!command.trim() || command.includes("\0") || (!isAbsolute(command) && /[\\/]/.test(command)))
-    throw new ExecutableError("INVALID_EXECUTABLE");
-  if (isAbsolute(command)) {
-    if (process.platform === "win32" && !/\.exe$/i.test(command)) throw new ExecutableError("INVALID_EXECUTABLE");
-    return { command, path: "" };
-  }
+  validateCommand(command);
+  if (isAbsolute(command)) return { command, path: "" };
   // Windows environment keys are case-insensitive; POSIX keys are not.
   const key = process.platform === "win32" ? Object.keys(environment).find(k => k.toUpperCase() === "PATH") : "PATH";
   const path = (key ? environment[key] : undefined) ?? "";
@@ -29,6 +35,7 @@ export function selectExecutable(environment: NodeJS.ProcessEnv): ExecutableSele
 /** Resolve once for the current owner. No shell, command probe or backend I/O. */
 export function resolveExecutable(selection: ExecutableSelection, cwd: string): string {
   if (!isAbsolute(cwd) || cwd.includes("\0")) throw new ExecutableError("INVALID_EXECUTABLE");
+  validateCommand(selection.command);
   if (isAbsolute(selection.command)) return selection.command;
   // The direct Windows client accepts native .exe files, never shell scripts.
   const name = process.platform === "win32" && !/\.exe$/i.test(selection.command)

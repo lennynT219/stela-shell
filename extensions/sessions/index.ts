@@ -3,6 +3,7 @@ import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts
 import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, sendContext, SessionError, type Envelope, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
 import type { OpenTransport, SessionTransport } from "./protocol.ts";
+import { openPrimaryActivity, type ActivityOwner } from "../primary-activity.ts";
 
 export const MESSAGE_TYPE = "stela-peer-message";
 const WIDGET = "ss-sessions";
@@ -28,9 +29,10 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   const open = dependencies.open ?? PeerTransport.open;
   let owner: ExtensionContext | undefined, ownerId: string | undefined, transport: SessionTransport | undefined;
   let mailbox = new Mailbox(), generation = 0, startup: AbortController | undefined;
-  let inFlight: string | undefined, paused = false, disabled = false, unavailable = "Session has not started.";
+  let inFlight: string | undefined, inFlightReceived: Received | undefined, paused = false, disabled = false, unavailable = "Session has not started.";
+  let activity: ReturnType<typeof openPrimaryActivity> | undefined;
   let ackMiss: { generation: number; activation: string; messageId: string; leafId: string | null } | undefined;
-  const flight = (id?: string) => { inFlight = id; ackMiss = undefined; if (id === undefined) mailbox.withdraw(); };
+  const flight = (received?: Received) => { inFlight = received?.message.id; inFlightReceived = received; ackMiss = undefined; if (!received) mailbox.withdraw(); };
 
   const owns = (ctx: ExtensionContext) => owner?.sessionManager === ctx.sessionManager && ownerId === ctx.sessionManager.getSessionId();
   const widget = () => {
@@ -38,18 +40,25 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     catch { /* presentation cannot change admission or block resource cleanup */ }
   };
   const acknowledge = (ctx: ExtensionContext) => {
-    if (!inFlight || !transport || !owns(ctx)) return;
+    if (!inFlight || !inFlightReceived || !transport || !owns(ctx)) return;
+    const received = inFlightReceived, content = formatMessage(received);
     const id = inFlight, activation = transport.info.id, leafId = ctx.sessionManager.getLeafId();
     if (ackMiss?.generation === generation && ackMiss.activation === activation && ackMiss.messageId === id && ackMiss.leafId === leafId) return;
     const matches = (entry: ReturnType<typeof ctx.sessionManager.getLeafEntry>) => entry?.type === "custom_message" && entry.customType === MESSAGE_TYPE &&
       (entry.details as { activation?: string; messageId?: string } | undefined)?.activation === activation &&
-      (entry.details as { messageId?: string } | undefined)?.messageId === id;
+      (entry.details as { messageId?: string } | undefined)?.messageId === id && entry.content === content;
     // Only stored active-branch evidence counts. No public committed-entry event/receipt is assumed.
     if (matches(ctx.sessionManager.getLeafEntry()) || ctx.sessionManager.getBranch().some(matches)) {
       const committed = mailbox.delivered(id); flight();
       if (!committed) {
         paused = true; // A correlation failure must never silently open a new automatic root.
         try { if (ctx.hasUI) ctx.ui.notify("No se pudo confirmar el contexto del mensaje. Sesiones en pausa hasta intervención del usuario.", "warning"); } catch { /* best-effort presentation */ }
+      }
+      // Late commitment can preserve messaging lineage, but cannot mint Memory
+      // activity from an expired body. Keep the authenticated Received witness.
+      if (committed && received.state === "delivered" && received.message.expiresAt > Date.now()) {
+        activity?.committed(received.message.work?.deadline ?? received.message.expiresAt, () =>
+          matches(ctx.sessionManager.getLeafEntry()) || ctx.sessionManager.getBranch().some(matches));
       }
       widget();
     } else ackMiss = { generation, activation, messageId: id, leafId }; // One bounded negative-cache slot.
@@ -63,7 +72,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     if (version !== generation || !transport || !owner || !owns(owner) || paused || inFlight || !owner.isIdle()) return;
     const next = mailbox.offer(); widget();
     if (!next) return;
-    flight(next.message.id);
+    flight(next);
     try {
       // Never sendUserMessage: peer text is visibly custom context, not a user prompt/command.
       // Busy sessions retain their bounded inbox until an actionable boundary.
@@ -76,6 +85,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   };
   const stop = async () => {
     generation++; startup?.abort(); startup = undefined;
+    activity?.close(); activity = undefined;
     const old = transport; transport = undefined;
     try { if (owner?.hasUI) owner.ui.setWidget(WIDGET, undefined); } catch { /* teardown must continue */ }
     owner = undefined; ownerId = undefined;
@@ -97,6 +107,11 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
         return disposition;
       }, controller.signal);
       if (generation !== version || controller.signal.aborted) { await fresh.close(); return; }
+      try {
+        activity = openPrimaryActivity(ctx,
+          () => version === generation && transport === fresh && owns(ctx) && !paused,
+          (candidate: ActivityOwner) => acknowledge(candidate as ExtensionContext));
+      } catch (error) { await fresh.close(); throw error; }
       transport = fresh; unavailable = ""; widget();
     } catch (error) {
       if (generation !== version) return;
@@ -114,7 +129,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
     if (paused || inFlight) return;
     const next = mailbox.offer(); widget();
     if (!next) return;
-    flight(next.message.id);
+    flight(next);
     // A proposal is not delivery. Only a committed active-branch entry acknowledges it.
     return { entries: [...event.entries, { type: "custom_message" as const, ...draft(next) }], continue: true };
   };

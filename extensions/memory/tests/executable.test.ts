@@ -28,6 +28,19 @@ test("absolute selection is retained without probing, fallback or requiring PATH
   assert.throws(() => resolveExecutable(selectExecutable({}),tmpdir()),missing);
 });
 
+test("Windows selection rejects implicit-drive paths and preserves full drive/UNC paths",{skip:process.platform!=="win32"},()=>{
+  for(const command of [String.raw`\tools\brain.exe`,"/tools/brain.exe","C:brain.exe",String.raw`C:tools\brain.exe`]) {
+    assert.throws(()=>selectExecutable({BRAIN_BIN:command}),invalid);
+    assert.throws(()=>resolveExecutable({command,path:""},tmpdir()),invalid);
+  }
+  for(const command of [String.raw`C:\tools\brain.exe`,"C:/tools/brain.exe",String.raw`\\server\share\brain.exe`]) {
+    const selected=selectExecutable({BRAIN_BIN:command});
+    assert.deepEqual(selected,{command,path:""});
+    assert.equal(resolveExecutable(selected,tmpdir()),command,"full paths are retained without a filesystem probe");
+  }
+  assert.deepEqual(selectExecutable({PATH:"unused"}),{command:"brain",path:"unused"});
+});
+
 test("PATH metadata selection honors order, spaces and executable files without launching candidates", () => {
   const root=mkdtempSync(join(tmpdir(),"ss-memory-executable-"));
   const first=join(root,"first with spaces"),second=join(root,"second");mkdirSync(first);mkdirSync(second);

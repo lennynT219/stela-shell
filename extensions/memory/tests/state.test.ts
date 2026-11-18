@@ -45,15 +45,44 @@ function fixture(snapshot:ObjectValue=unbound(),access:Access={read:()=>true,wri
 }
 const rejects=(promise:Promise<unknown>,code:string)=>assert.rejects(promise,(error:any)=>error.code===code);
 
-test("host scope, genuine first input and current tool permissions cannot be supplied by model data",async()=>{
+test("host scope, authorized activity and current tool permissions cannot be supplied by model data",async()=>{
   const {state,client}=fixture();
-  assert.equal(client.calls.length,0);await rejects(state.read(),"AUTHORITY_CHANGED");
+  assert.equal(client.calls.length,0);await rejects(state.read(),"ACTIVITY_REQUIRED");
   state.human();await state.read();
   await rejects(state.save({...create,memory_id:ID}),"INVALID_INPUT");
   await rejects(state.save({...create,human_approved:true}),"INVALID_INPUT");
   const readonly=new MemoryState(cwd,config,{read:()=>true,write:()=>false},client);
-  readonly.human();await readonly.read();await rejects(readonly.save(create),"AUTHORITY_CHANGED");assert.equal(client.writes().length,0);
+  readonly.human();await readonly.read();await rejects(readonly.save(create),"WRITE_DISABLED");assert.equal(client.writes().length,0);
   assert.throws(()=>new MemoryState(join(cwd,"..","other"),config,{read:()=>true,write:()=>true},client),StateError);
+});
+
+test("agentic readiness is live proof, not permanent human initialization",async()=>{
+  const {state,client}=fixture();let valid=true;
+  state.agentic(()=>valid);assert.equal(state.ready,true);await state.read();
+  valid=false;assert.equal(state.ready,false);
+  assert.throws(()=>state.view(),(error:any)=>error.code==="AGENTIC_ACTIVITY_EXPIRED");
+  await rejects(state.read(),"AGENTIC_ACTIVITY_EXPIRED");assert.equal(client.calls.length,1);
+  state.invalidate();assert.equal(state.ready,false,"invalidation cannot resurrect expired peer activity");
+  state.human();assert.equal(state.ready,true);await state.read();
+  state.agentic(()=>false);assert.equal(state.ready,true,"peer revocation cannot erase genuine human readiness");
+});
+
+test("agentic readiness does not override read permissions or approve manual acceptance",async()=>{
+  const denied=fixture(unbound(),{read:()=>false,readError:()=>undefined,write:()=>true});
+  denied.state.agentic(()=>true);await rejects(denied.state.read(),"READ_DISABLED");assert.equal(denied.client.calls.length,0);
+  const manual=fixture(found("manual_review"));manual.state.agentic(()=>true);await manual.state.read();
+  await rejects(manual.state.save({action:"accept_manual",reason:"Useful reviewed change"}),"HUMAN_APPROVAL_REQUIRED");
+  assert.equal(manual.client.writes().length,0);
+});
+
+test("specific read denial and expired peer proof are rechecked after asynchronous reads",async()=>{
+  let denial:string|undefined;
+  const f=fixture(unbound(),{read:()=>denial===undefined,readError:()=>denial,write:()=>true});
+  f.state.human();await f.state.read();denial="CONFIGURATION_CHANGED";
+  await rejects(f.state.read(),"CONFIGURATION_CHANGED");assert.equal(f.client.calls.length,1);
+  const p=fixture();let valid=true;p.state.agentic(()=>valid);
+  p.client.intercept=async op=>{if(op==="resolve")valid=false;return undefined;};
+  await rejects(p.state.read(),"AGENTIC_ACTIVITY_EXPIRED");assert.equal(p.client.calls.length,1);assert.equal(p.state.loaded,false);
 });
 
 test("normal save confirms exact identity/revision read-back; successor baseline is host-owned full u64",async()=>{
@@ -64,6 +93,39 @@ test("normal save confirms exact identity/revision read-back; successor baseline
   const next=await state.save({reason:"Useful change",body:"complete body\r\n"});
   assert.equal(next.revision,"9007199254740994");
   assert.deepEqual(client.writes()[1].args,{memory_id:ID,expected:{revision:9007199254740993n,accepted_markdown:"exact accepted\r\n"},body:"complete body\r\n"});
+});
+
+test("known HTML rejection uses local diagnostics without leaking backend text or retrying",async()=>{
+  for(const existing of [false,true]) {
+    const {state,client,fence}=fixture(existing?found():unbound());state.human();await state.read();
+    const sections=["Literal <UUID>","Decisions","Status","Evidence","Next"];
+    const input=existing?{reason:"Useful change",body:"Literal <UUID>"}:{...create,sections};
+    client.intercept=async op=>["create","update"].includes(op)?{
+      status:"invalid",reason:"UNCLOSED_HTML",message:"PRIVATE_BACKEND_TEXT\u001b[31m",memory_id:NEW,
+    }:undefined;
+    const result=await state.save(input);
+    assert.deepEqual(result,{status:"invalid",code:"UNCLOSED_HTML",message:"El documento contiene HTML sin cerrar. Usa código en línea o escapa los marcadores literales; no se reintentó el guardado."});
+    assert.doesNotMatch(encode(result),/PRIVATE_BACKEND_TEXT|memory_id|revision|read_back/);
+    assert.equal(client.writes().length,1);assert.equal(client.calls.length,3,"no retry or read-back after rejection");
+    assert.equal(fence.uncertain,false,"a definite rejection is not a lost receipt");
+    assert.equal(state.loaded,false);
+    if(existing)assert.equal(client.writes()[0].args.body,input.body);
+    else assert.deepEqual(client.writes()[0].args.sections,sections,"format guidance must not rewrite caller bytes");
+  }
+});
+
+test("old backends, unknown reasons and mismatched statuses remain generic",async()=>{
+  for(const rejection of [
+    {status:"invalid",message:"PRIVATE_BACKEND_TEXT"},
+    {status:"invalid",reason:"UNKNOWN_CODE",message:"PRIVATE_BACKEND_TEXT"},
+    {status:"invalid",reason:"UNCLOSED_HTML\nPRIVATE_BACKEND_TEXT",message:"PRIVATE_BACKEND_TEXT"},
+    {status:"busy",reason:"UNCLOSED_HTML",message:"PRIVATE_BACKEND_TEXT"},
+  ]) {
+    const {state,client}=fixture();state.human();await state.read();
+    client.intercept=async op=>op==="create"?rejection:undefined;
+    assert.deepEqual(await state.save(create),{status:rejection.status});
+    assert.equal(client.writes().length,1);assert.equal(client.calls.length,3);
+  }
 });
 
 test("manual/binding/revision changes reject stale saves without silently adopting a new baseline",async()=>{
@@ -85,7 +147,7 @@ test("manual acceptance requires actual exact-byte UI approval and revalidation 
     assert.equal(client.writes().length,approve===true?1:0);
   }
   let allowed=true;const f=fixture(found("manual_review"),{read:()=>true,write:()=>allowed,confirm:async()=>{allowed=false;return true;}});
-  f.state.human();await f.state.read();await rejects(f.state.save({action:"accept_manual",reason:"Review"}),"AUTHORITY_CHANGED");assert.equal(f.client.writes().length,0);
+  f.state.human();await f.state.read();await rejects(f.state.save({action:"accept_manual",reason:"Review"}),"WRITE_DISABLED");assert.equal(f.client.writes().length,0);
   const access:Access={read:()=>true,write:()=>true,confirm:async()=>{h.client.snapshot=found("manual_review",2,"other");return true;}};
   const h=fixture(found("manual_review"),access);h.state.human();await h.state.read();await rejects(h.state.save({action:"accept_manual",reason:"Review"}),"BASELINE_CHANGED");assert.equal(h.client.writes().length,0);
 });
@@ -124,7 +186,7 @@ test("owned cancellation, overlapping calls and changed input cannot publish sta
   await rejects(state.read(),"BUSY");state.human();resolve();await rejects(pending,"CANCELLED");assert.equal(client.writes().length,0);
   assert.equal(state.needsLookup,true,"an older operation's cancellation must not replace the new input's lookup state");
   client.intercept=undefined;await state.read();const cancelled=new AbortController();cancelled.abort();await rejects(state.save(create,cancelled.signal),"CANCELLED");
-  await state.close();await rejects(state.read(),"AUTHORITY_CHANGED");assert.equal(client.closed,1);
+  await state.close();await rejects(state.read(),"OWNER_CLOSED");assert.equal(client.closed,1);
 });
 
 test("a confirmed receipt stays saved when subsequent read-back is cancelled/unavailable",async()=>{

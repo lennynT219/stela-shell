@@ -109,6 +109,42 @@ test("FARO verification and delegation instructions reach the parent tool and bo
   assert.match(helper, /return a partial or blocked result instead of attempting it/);
 });
 
+test("FARO recovery uses Brain only and never imports a legacy record or writes on lifecycle hooks", async () => {
+  const h = harness(); faroMethod(h.pi);
+  const original = [{ role: "user", content: "Relevant project work" }];
+  const first = await h.emit("context", { messages: original });
+  assert.equal(first.messages[0], original[0]); assert.equal(original.length, 1);
+  const content = first.messages.at(-1).content;
+  assert.match(content, /Brain is the only primary project-memory authority/);
+  assert.match(content, /ss_memory_read/);
+  assert.match(content, /ss_memory_save before the final reply/);
+  assert.match(content, /without a substitute continuity file or mirror/);
+  assert.match(content, /migration requires a separate explicit human instruction/);
+  assert.match(content, /not proof that a read occurred/);
+  assert.doesNotMatch(content, /Project work-state file:|WORK_STATE\.md|read this file if it exists/);
+  assert.equal(await h.emit("context", { messages: original }), undefined, "reminder is not a per-turn fetch or save");
+  for (const [event, value, reason] of [
+    ["session_start", { reason: "reload" }, "session reload"],
+    ["session_compact", {}, "context compacted"],
+    ["session_tree", {}, "conversation navigation"],
+    ["agent_settled", { aborted: true }, "previous work cycle interrupted"],
+  ] as const) {
+    await h.emit(event, value);
+    const next = await h.emit("context", { messages: original });
+    assert.ok(next.messages.at(-1).content.includes(reason));
+    assert.match(next.messages.at(-1).content, /Brain is the only primary/);
+    assert.equal(await h.emit("context", { messages: original }), undefined);
+  }
+  await h.emit("agent_settled", { aborted: false });
+  assert.equal(await h.emit("context", { messages: original }), undefined);
+  assert.equal(h.tools.size, 0); assert.deepEqual(h.entries, [], "no persistent append or startup/completion writer");
+  const method = readFileSync(new URL("../../method/assets/method.md", import.meta.url), "utf8");
+  assert.match(method, /only primary durable project-memory authority/);
+  assert.match(method, /repository continuity files are not a required record, fallback backend or synchronized mirror/);
+  assert.match(method, /requires a separate explicit human instruction/);
+  assert.doesNotMatch(method, /Use `docs\/WORK_STATE\.md` as|# Work state/);
+});
+
 test("assignment validation keeps the bounded contract and rejects authority/configuration injection", () => {
   assert.deepEqual(validateAssignment(assignment), { ...assignment, timeout_seconds: DEFAULT_TIMEOUT_SECONDS });
   for (const input of [null, [], {}, { ...assignment, objective: " " }, { ...assignment, references: [] }, { ...assignment, references: [3] }, { ...assignment, context: "x".repeat(8193) }, { ...assignment, label: "bad\nlabel" }, { ...assignment, model: "other" }, { ...assignment, cwd: "/" }, { ...assignment, tools: ["bash"] }]) assert.throws(() => validateAssignment(input));

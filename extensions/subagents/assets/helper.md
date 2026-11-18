@@ -13,7 +13,7 @@ Apply FARO proportionately within this child role, not as a new parent workflow.
 
 ## Limits
 
-- This first implementation is read-only. No file changes, project-state updates (including WORK_STATE), indexes, installation, configuration, shell execution, network research, Git mutations, publication or recursive delegation.
+- This first implementation is read-only. No file changes, project-state updates (including Brain Memory or legacy continuity files), indexes, installation, configuration, shell execution, network research, Git mutations, publication or recursive delegation.
 - Only explicitly enabled built-in readers are available. Do not activate another tool or route around a blocked call. A denial ends the affected work; do not retry with another spelling, path or tool.
 - Do not fix findings, broaden the scope, suggest unrelated improvements or add a verification round by habit. Do not run tests. Report missing runtime evidence honestly.
 - Work within at most 12 model turns, 32 read-tool calls and the hard execution budget supplied with the assignment. These are ceilings, not targets to consume. No progress turns are required; the host can retain already emitted public text but cannot recover an answer you have not emitted.

@@ -2,17 +2,33 @@
 
 Local implementation: a primary-only Pi extension, ordinary `ss_memory_read` /
 `ss_memory_save` tools, transient owned state, and the existing isolated Brain JSON
-client. **Save and observe the actual result BEFORE the final user response**, just
-like WORK_STATE. No Pi fork, post-settlement tool replay, hidden summarizer or
+client. **Save and observe the actual result BEFORE the final user response**. No Pi fork, post-settlement tool replay, hidden summarizer or
 separate finalization model turn.
 
-This does not automatically/permanently activate a real vault/profile, install
-Brain or migrate continuity. A separately authorized bounded real-provider trial
-has now passed in the Brain repository; details are in WORK_STATE below.
-`docs/WORK_STATE.md` remains the current primary record. The package declares the
-entry point; loading it authorizes ordinary Memory use. No Memory lookup or Brain
-subprocess runs before genuine interactive/RPC input. Helpers are excluded before
-tools/hooks/resources. This source change does not create the missing profile link.
+Brain is StelaShell's only primary durable project memory. The user ordered
+phase 1 to implement this policy first; importing existing `docs/WORK_STATE.md`
+content is phase 2 and awaits a later explicit human order. That file is retained
+legacy evidence, not a required record, fallback backend or synchronized mirror.
+This implementation does not read/import/delete/archive/synchronize it, install
+Brain, configure a vault/profile or reload an existing SS instance. Use an
+operator-controlled reload or fresh session to load changed instructions. If
+Brain/tools are unavailable or denied, report memory unavailable/persistence
+pending and continue only independent authorized work, without a substitute store.
+Source policy is not universal model-compliance or permission enforcement.
+
+The package declares the entry point; loading it authorizes ordinary Memory use. No Memory lookup or Brain
+subprocess runs before owned interactive/RPC input or live authenticated PRIMARY
+SS work committed by the receiver to the active branch. Arbitrary custom messages
+and replayed history cannot initialize it. Helpers are excluded before
+tools/hooks/resources. Source installation alone does not create profile links.
+
+The user-authorized Windows route is now configured as
+`C:\Users\lmasapanta\.stela-shell\extensions\ss-memory` → this checkout's
+`extensions/memory`. Its canonical target and unique loading route are verified;
+settings/MCP and the four other junctions are unchanged. No agent reload or Brain
+Memory operation was performed. Use operator-controlled `/reload` or a fresh
+session to load it; this filesystem setup is not Windows Memory read/save proof
+and did not import legacy continuity contents. Other machines need their own route.
 
 ## Area naming and existing data
 
@@ -56,6 +72,10 @@ export BRAIN_BIN=/absolute/path/to/brain
 
 An executable selection is one absolute path or bare command name, not a shell
 alias/argument string. Relative paths containing separators are rejected.
+On Windows, drive-relative values such as `C:brain.exe` and root-relative values
+such as `\tools\brain.exe` or `/tools/brain.exe` are also rejected: use a full
+`C:\tools\brain.exe`/UNC `.exe` path or a bare name searched in PATH. Both
+selection and direct resolution validate this rule without launching candidates.
 A bad BRAIN_BIN selection does not fall back to another executable. Bare names
 are located with metadata checks in PATH order once per owner, then pinned as an
 absolute path for direct shell:false execution. PATH relative/empty components
@@ -66,7 +86,7 @@ The unchanged client still receives a minimal child environment without PATH or
 BRAIN_BIN; its host explicitly opts into Brain's existing configured-vault mode.
 
 SS freezes that child environment and checks current executable/environment
-authority. On the first genuine read, a host guard lazily captures only metadata
+authority. On the first authorized read, a host guard lazily captures only metadata
 of Brain's config pathname (HOME/.config/brain/config.toml on Unix,
 USERPROFILE\\.config\\brain\\config.toml on Windows), including leaf/target identity,
 size and modification/change timestamps. It never reads configuration contents.
@@ -91,11 +111,13 @@ hook-based internal-read revocation or security certification is claimed.
 
 1. Startup registers tools/state and may resolve the configured executable's PATH
    entry. No Brain process, Memory or marker is created.
-2. First genuine interactive/RPC input enables read-only resolution before work.
-   Extension-generated messages cannot manufacture first-use human eligibility.
+2. Owned interactive/RPC input OR authenticated local PRIMARY activity enables
+   read-only resolution before work. The latter requires the live receiver's
+   actual admitted message to be committed to the active branch before expiry;
+   it never manufactures human input or enables fresh human-originated work roots.
 3. Complete accepted Markdown is injected as **untrusted ephemeral project data**,
    not overriding instructions, permission or another persisted Memory copy.
-4. The primary decides whether useful durable state changed, as with WORK_STATE.
+4. The primary decides whether useful durable state changed in the selected Memory.
    It calls `ss_memory_save` through the normal tool pipeline BEFORE its final
    reply. No explicit save call means no guessed update or automatic greeting save.
 5. The host revalidates the selected binding and exact accepted revision/bytes,
@@ -105,12 +127,60 @@ hook-based internal-read revocation or security certification is claimed.
    a publication whose receipt was already confirmed.
 
 Ordinary input/steering, compaction, navigation and shutdown invalidate stale
-snapshots and cancel owned work. New navigation/session owners require genuine
-input again. Continuations use the same authorized Memory, not a new identity per
-model iteration. Failed automatic lookup is not retried by every context hook;
+snapshots and cancel owned work. New navigation/session owners require their own
+owned human/RPC or live authenticated PRIMARY activity. Continuations use the same
+authorized Memory, not a new identity per model iteration. Failed automatic lookup is not retried by every context hook;
 use an explicit read or a new meaningful input/lifecycle boundary. No polling or
 operation queue is added. Known writer coordination may use existing session tools;
 conflict/busy is not authority for automatic merge, repeated writes or lock stealing.
+
+### Authenticated PRIMARY activity and local diagnostics
+
+`extensions/primary-activity.ts` exposes only an ephemeral, host-owned live proof,
+not message/Memory payloads or persisted grants. Receiver-owned closures remain
+private host state. Sessions alone
+publishes it after matching activation/message ID and exact formatted content on
+the active branch, successful mailbox commitment, a still-delivered `Received`
+and unexpired message TTL. A late commitment can retain the existing messaging
+lineage but cannot initialize Memory. A timely commitment uses only its original
+work deadline (or ordinary message expiry); observation never renews it.
+
+The source is bound to session-manager identity, session ID, cwd and activation.
+Memory can ask its live commitment observer before hooks/tool checks, avoiding a
+Sessions-first hook-order assumption. Source replacement, stop/reload/navigation,
+pause/interruption, lost branch proof and expiry revoke peer eligibility. Human
+readiness remains separate: a peer token never latches the human boolean, resets
+message budgets or approves exceptional saves. Tools, configuration/environment,
+exact baseline and publication-uncertainty checks still apply before/after work.
+No startup/empty save, synthetic `sendUserMessage`, automatic retry or helper grant
+is added. The weak registry is shared across extension module caches, not across
+processes. It is not a sandbox against malicious same-process extension code.
+
+Fixed local codes replace ambiguous readiness/access failures:
+
+| Code | Local cause |
+| --- | --- |
+| `ACTIVITY_REQUIRED` | No owned human/RPC or committed live PRIMARY activity |
+| `AGENTIC_ACTIVITY_EXPIRED` | Previously accepted peer proof is no longer live |
+| `ACTIVITY_CHECK_FAILED` | Live receiver activity could not be verified |
+| `OWNER_CLOSED` / `OWNER_CHANGED` / `INPUT_CHANGED` | Closed/replaced owner or invalidated operation |
+| `READ_DISABLED` / `WRITE_DISABLED` | Current reader/writer access denies the operation |
+| `ENVIRONMENT_CHANGED` / `SCOPE_CHANGED` | Executable/environment or injected host scope changed |
+| `CONFIGURATION_CHANGED` / `SCOPE_CHECK_FAILED` | Config metadata drift or failed scope verification |
+
+Messages/footer labels come from a local allowlist, not raw backend diagnostics,
+configuration values or private paths. `CANCELLED` remains distinct. An activation
+waiting for authorized activity is shown as pending, not as a successful load.
+These codes describe the current guard, not a reconstructed unique cause for the
+historical `AUTHORITY_CHANGED` incident. The operator reports its earlier stale
+session `EXECUTABLE_NOT_FOUND` resolved; no PATH/config repair was added.
+
+Implementation/design source reviews completed within their explicit references;
+regressions for live/spoofed/expired/cross-owner activity, commitment ordering,
+module-cache sharing, revocation, human compatibility, disabled access and manual
+approval are prepared, **not executed**. No build/reload/functional/native proof
+or legacy-content import is claimed. The legacy WORK_STATE artifact retains
+historical review limits; Brain alone owns current project continuity.
 
 ### Tools
 
@@ -120,7 +190,7 @@ conflict/busy is not authority for automatic merge, repeated writes or lock stea
   extra full-Memory tool-result copy. Never traverse links or search other notes.
 - **`ss_memory_save` / Guardar memoria** — `reason` explains the durable outcome;
   it is not a permission grant. New unbound context: `title` plus exactly five
-  `sections` in WORK_STATE order. Existing Memory: complete successor `body`,
+  `sections` in canonical Memory order. Existing Memory: complete successor `body`,
   without YAML frontmatter, retaining the five top-level H2s, accepted human
   material and genuine history/optional Project relations. Brain alone parses it.
 - Exceptional `action: "accept_manual"` asks actual host UI approval for the exact
@@ -136,6 +206,57 @@ bytes/binding, input or permission revocation prevents the mutation. Partial/cor
 state requires explicit diagnosis/recovery outside this automatic flow, not repair.
 Content usefulness and final-answer discipline are primary-agent policy; there is
 no hidden natural-language classifier or guarantee against every model mistake.
+
+## Markdown authoring and validation diagnostics
+
+When authoring new Memory content, represent literal placeholder paths/templates
+as inline code, e.g. `05-memorias/<UUID>/` and `ss_<area>_<action>`, or escape their
+angle brackets. Raw placeholders can be interpreted as unclosed HTML, not plain
+examples. H3 subsections are supported; they do not replace the five canonical
+H2s. This guidance is included in the agent policy and save-parameter descriptions.
+SS does not parse or automatically rewrite the Markdown, omit useful content,
+normalize accepted bytes or weaken Brain's validation to make a save pass.
+
+Brain may return `status: invalid` with the existing v1 failure field
+`reason: UNCLOSED_HTML`. SS maps only that exact status/reason pair to
+`code: UNCLOSED_HTML` and a fixed local Spanish explanation, including advice to
+use inline code or escapes. The status line reads
+`Memoria · contenido inválido · HTML sin cerrar`; the tool still reports an error,
+not a saved receipt. Raw backend messages, document fragments, paths and unknown
+reasons are never echoed. No automatic retry or post-rejection read-back is added.
+Older binaries without the reason and other rejections remain generic; the
+footer now identifies `invalid` as `contenido inválido`, not `pendiente`.
+
+The operator reports completing the Brain rebuild and manual SS reload after
+this source update. No assistant build/reload was performed, and that report is
+not independent binary-provenance, runtime or successful-publication evidence.
+Regression source covers typed-reason transport, create/update presentation,
+unknown/legacy errors, byte preservation and no retry; it has NOT been executed
+under the current no-assistant-tests restriction. The invalid candidate was not
+automatically retried and its lock sidecar is untouched. A later separately
+user-requested corrected save returned saved, revision 1 and read_back confirmed;
+see WORK_STATE for the actual identity/receipt. That normal-use result does not
+establish the broader Windows regression or exceptional/security matrix.
+
+A subsequent human-directed cross-session normal-use check recovered the same
+Memory at revision 1 and answered five content/restriction questions from complete
+matching host Memory context, not project-file reads. That host context preceded
+the explicit metadata read; no new post-tool insertion attestation is claimed.
+The designated sole writer reports one normal saved receipt at revision 2 with
+read_back confirmed. The coordinator independently directly read found at the
+same ID/revision 2, writes not paused, matching the expected 1 + 1 = 2. Matching
+complete revision-2 host context includes the useful publication/readiness update
+and preserves the five-section/history/constraint material. An initial messaging
+DELIVERY_UNCONFIRMED delayed the writer's receipt report; its human-requested
+resend was not a repeated Memory save or Memory save_unconfirmed. Core normal-use
+recovery/update/cross-session reading therefore have scoped evidence. Exclusive
+agentic initialization without prior human/RPC input, pristine chat, and broader
+regressions/native/SDK/security remain
+unestablished. The user subsequently explicitly selected the two-phase change:
+Brain-only runtime/agent policy now, legacy-content import only after a later
+human order. The source policy change is not an import or deletion and does not
+claim a new runtime verification. Existing source/normal-use evidence remains
+scoped as above.
 
 ## Transport bounds and result semantics
 
@@ -228,5 +349,6 @@ unchanged; actual test Memory/binding/locks and native session histories remain.
 
 This bounded real-provider/RPC evidence is not interactive-TUI, native
 Windows/macOS/Bun, performance/security or universal model-compliance certification.
-WORK_STATE replacement, optional installer, stable executable placement and
-permanent activation remain separate authorized outcomes.
+Legacy-content import, optional installer, stable executable placement and
+machine-specific activation remain separate authorized outcomes. Brain-only
+policy does not provide a file backend while waiting for any of them.

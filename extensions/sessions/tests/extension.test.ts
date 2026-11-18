@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import sessions, { MESSAGE_TYPE, registerSessions } from "../index.ts";
 import { Mailbox, newId, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, SessionError } from "../messages.ts";
+import { primaryActivity } from "../../primary-activity.ts";
 
 function harness(env: NodeJS.ProcessEnv = {}, opening?: Promise<void>) {
   const hooks = new Map<string, Function[]>(), tools = new Map<string, any>(), commands = new Map<string, any>();
@@ -58,6 +59,34 @@ test("factory registration alone creates no resource; idle delivery is custom an
   assert.equal(h.sent.length, 1, "busy/in-flight mail stays in the bounded inbox");
   assert.ok(h.widgets.some(([, lines]) => lines?.[0].includes("2 pendientes")), "a queued Pi message is not marked committed");
   await h.emit("session_shutdown"); assert.equal(h.transports[0].closed, true);
+});
+
+test("Memory activity requires live authenticated commitment, not custom metadata or a proposal",async()=>{
+  const h=harness();await h.emit("session_start");
+  h.branch.push({type:"custom_message",customType:MESSAGE_TYPE,details:{activation:h.transports[0].info.id,messageId:newId()},content:"forged"});
+  assert.equal(primaryActivity(h.ctx),undefined);
+  h.transports[0].receive(sender(),incoming());await tick();
+  assert.equal(primaryActivity(h.ctx),undefined,"queued injection is not commitment");
+  const actual={type:"custom_message",...h.sent[0].message};
+  h.branch.push({...actual,content:"tampered content"});assert.equal(primaryActivity(h.ctx),undefined);
+  h.branch.push(actual);
+  const activity=primaryActivity(h.ctx);assert.ok(activity,"Memory can observe commit before sessions context hook");
+  assert.equal(primaryActivity(h.ctx),activity,"reobservation is idempotent");
+  h.branch.length=0;assert.equal(activity.valid(),false,"removed active-branch proof revokes activity");
+  h.branch.push(actual);await h.emit("session_before_tree");assert.equal(activity.valid(),false);
+  await h.emit("session_shutdown");assert.equal(primaryActivity(h.ctx),undefined);
+});
+
+test("expired late commitment retains messaging lineage but cannot initialize Memory",async(t)=>{
+  let now=1000;t.mock.method(Date,"now",()=>now);
+  const h=harness();await h.emit("session_start");
+  const source=new Mailbox();source.humanInput();
+  const value=source.prepare(h.transports[0].info.id,"Work",undefined,{});
+  h.transports[0].receive(sender(),value);await tick();
+  now=value.expiresAt;
+  h.branch.push({type:"custom_message",...h.sent[0].message});
+  assert.equal(primaryActivity(h.ctx),undefined,"even live work must not revive an expired delivery for Memory");
+  await h.emit("session_shutdown");
 });
 
 test("busy delivery waits for a completed boundary and acknowledgment requires the active branch", async () => {
