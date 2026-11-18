@@ -5,12 +5,14 @@ Local implementation: a primary-only Pi extension, ordinary `ss_memory_read` /
 client. **Save and observe the actual result BEFORE the final user response**. No Pi fork, post-settlement tool replay, hidden summarizer or
 separate finalization model turn.
 
-Brain is StelaShell's only primary durable project memory. The user ordered
-phase 1 to implement this policy first; importing existing `docs/WORK_STATE.md`
-content is phase 2 and awaits a later explicit human order. That file is retained
-legacy evidence, not a required record, fallback backend or synchronized mirror.
-This implementation does not read/import/delete/archive/synchronize it, install
-Brain, configure a vault/profile or reload an existing SS instance. Use an
+Brain is StelaShell's only primary durable project memory. The user separately
+ordered importing the complete `docs/WORK_STATE.md` content into the selected
+Brain Memory, then retiring the repository file. Normal creation returned saved
+with confirmed read-back; an explicit read found the same identity/revision with
+writes unpaused. The complete literal historical snapshot remains in Brain,
+not a required repository-file read, fallback backend or synchronized mirror.
+The extension does not automatically migrate/delete/archive/synchronize records,
+install Brain, configure a vault/profile or reload an existing SS instance. Use an
 operator-controlled reload or fresh session to load changed instructions. If
 Brain/tools are unavailable or denied, report memory unavailable/persistence
 pending and continue only independent authorized work, without a substitute store.
@@ -179,8 +181,9 @@ Implementation/design source reviews completed within their explicit references;
 regressions for live/spoofed/expired/cross-owner activity, commitment ordering,
 module-cache sharing, revocation, human compatibility, disabled access and manual
 approval are prepared, **not executed**. No build/reload/functional/native proof
-or legacy-content import is claimed. The legacy WORK_STATE artifact retains
-historical review limits; Brain alone owns current project continuity.
+or legacy-content import is claimed by that source-review operation. The
+WORK_STATE snapshot subsequently imported into Brain retains historical review
+limits; Brain alone owns current project continuity.
 
 ### Tools
 
@@ -235,7 +238,8 @@ unknown/legacy errors, byte preservation and no retry; it has NOT been executed
 under the current no-assistant-tests restriction. The invalid candidate was not
 automatically retried and its lock sidecar is untouched. A later separately
 user-requested corrected save returned saved, revision 1 and read_back confirmed;
-see WORK_STATE for the actual identity/receipt. That normal-use result does not
+see the WORK_STATE snapshot imported into Brain for the historical identity/receipt.
+That normal-use result does not
 establish the broader Windows regression or exceptional/security matrix.
 
 A subsequent human-directed cross-session normal-use check recovered the same
@@ -252,11 +256,15 @@ resend was not a repeated Memory save or Memory save_unconfirmed. Core normal-us
 recovery/update/cross-session reading therefore have scoped evidence. Exclusive
 agentic initialization without prior human/RPC input, pristine chat, and broader
 regressions/native/SDK/security remain
-unestablished. The user subsequently explicitly selected the two-phase change:
-Brain-only runtime/agent policy now, legacy-content import only after a later
-human order. The source policy change is not an import or deletion and does not
-claim a new runtime verification. Existing source/normal-use evidence remains
-scoped as above.
+unestablished. The user subsequently selected the two-phase change: Brain-only
+runtime/agent policy first, then a separately ordered legacy-content import. That import is
+now complete: a fresh unbound context received the full WORK_STATE snapshot plus
+a current five-section synthesis, with a saved/read-back-confirmed receipt and an
+explicit same-ID/revision found read. The user then separately authorized removal
+of the repository file. The original source's 90,519 bytes were preserved in the
+literal snapshot and its SHA-256 matched before/after import. This normal-use
+migration is not execution of new regressions or a broader runtime certification;
+existing source/normal-use evidence remains scoped as above.
 
 ## Transport bounds and result semantics
 
@@ -328,8 +336,9 @@ SS_TEST_PI_CLI=/absolute/path/to/pi/dist/bundle/cli.js npm test
 ```
 
 Absent optional binaries skip corresponding integration cases; explicitly selected
-missing/incompatible binaries fail, without fallback. Current observed results and
-receipts are in [WORK_STATE](../../docs/WORK_STATE.md). The new runtime review
+missing/incompatible binaries fail, without fallback. Current outcomes belong to
+the selected Brain Memory; historical results and receipts are preserved in the
+WORK_STATE snapshot imported there. The new runtime review
 9f7256c6 exceeded180s without an answer and remains INCOMPLETE, like the separate
 prior client review; neither is approval or a pending/retried assignment. Later
 parent regressions preserve new-input lookup state when old cancellation/receipts
@@ -349,6 +358,7 @@ unchanged; actual test Memory/binding/locks and native session histories remain.
 
 This bounded real-provider/RPC evidence is not interactive-TUI, native
 Windows/macOS/Bun, performance/security or universal model-compliance certification.
-Legacy-content import, optional installer, stable executable placement and
+Legacy-content import and repository-file retirement are complete within their
+explicitly authorized scope. Optional installer, stable executable placement and
 machine-specific activation remain separate authorized outcomes. Brain-only
 policy does not provide a file backend while waiting for any of them.

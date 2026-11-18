@@ -6,7 +6,7 @@ Status: fixed work windows were published in 87fe4d0. The user-approved thread-i
 
 Ordinary automatic conversations inherit a ten-minute expiry, including sends without reply_to. Fixed opt-in work windows solve longer bounded collaboration, not unlimited rounds.
 
-A later diagnosis reproduced a second limitation: one activation-wide sticky work boundary vetoed exact replies to other independently admitted threads. Two local CONTEXT_MISMATCH incidents occurred before IPC while prior work windows were still live. Eight synthetic cases reproduced the live/expired-old-work conflict across ordinary/work roots and same/different peers. Existing passing tests intentionally enforced some blocking, so thread isolation is an approved contract correction, not merely removal of a failing assertion. Older missing-anchor/lifetime incidents and a peer-reported WORK_EXPIRED lack complete runtime attribution; see docs/WORK_STATE.md.
+A later diagnosis reproduced a second limitation: one activation-wide sticky work boundary vetoed exact replies to other independently admitted threads. Two local CONTEXT_MISMATCH incidents occurred before IPC while prior work windows were still live. Eight synthetic cases reproduced the live/expired-old-work conflict across ordinary/work roots and same/different peers. Existing passing tests intentionally enforced some blocking, so thread isolation is an approved contract correction, not merely removal of a failing assertion. Older missing-anchor/lifetime incidents and a peer-reported WORK_EXPIRED lack complete runtime attribution; see the historical WORK_STATE snapshot imported into Brain.
 
 Separate a message's delivery validity from a fixed, bounded **work-context communication window**, without creating a job runner, resetting automatic budgets or extending permissions. The window does not stop remote tools/models, establish a cost/token cap, or prove a task started/completed.
 
@@ -96,7 +96,7 @@ Approved TypeScript implementation surfaces under the negotiated-support design:
 - extensions/sessions/index.ts: optional root argument, guidance/presentation and existing lifecycle ownership.
 - extensions/sessions/protocol.ts: strict work/control payloads and request-bound authenticated capability responses.
 - extensions/sessions/transport.ts and transport-windows.ts: bounded negotiation/dispatch; preserve their protection/deadline/cancellation behavior.
-- Relevant messages/protocol/transport/extension/Pi-fixture tests and extensions/sessions/README.md; continuity stays in docs/WORK_STATE.md.
+- Relevant messages/protocol/transport/extension/Pi-fixture tests and extensions/sessions/README.md; continuity belongs to the selected Brain Memory.
 
 No Brain memory source, web/helper behavior, SDK/runtime installation, dependency, profile/link/settings/credentials, native build or live provider experiment is included. No branch/switch/commit/push or publication is authorized. Clearer diagnostics do not renew a context or authorize a retry; the opt-in semantic extension is separate from ordinary v1 behavior.
 
