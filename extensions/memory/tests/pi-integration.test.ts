@@ -57,7 +57,9 @@ test("native Pi + Brain: lookup precedes work; greeting/no-op and pre-final crea
     assert.equal((await p.run("save")).text,"MEMORY_RESULT:saved:confirmed");
     const ids=readdirSync(join(f.vault,"05-memorias")).filter(n=>/^[\da-f-]{36}$/.test(n));assert.equal(ids.length,1);const raw=()=>readFileSync(join(f.vault,"05-memorias",ids[0],"Memoria.md"),"utf8");
     assert.match(raw(),/memory_revision: 1/);assert.equal((await p.run("update")).text,"MEMORY_RESULT:saved:confirmed");assert.match(raw(),/memory_revision: 2/);assert.match(raw(),/Updated fixture scope/);
-    const before=raw();assert.equal((await p.run("noop")).text,"MEMORY_RESULT:unchanged:confirmed");assert.equal(raw(),before);
+    const history=()=>readFileSync(join(f.vault,"05-memorias",ids[0],"Historial.md"),"utf8");
+    const log=history();assert.match(log,/Verified useful successor/);assert.doesNotMatch(log,/## Revision|Updated fixture scope/);
+    const before=raw();assert.equal((await p.run("noop")).text,"MEMORY_RESULT:unchanged:confirmed");assert.equal(raw(),before);assert.equal(history(),log);
     assert.deepEqual(readdirSync(join(f.vault,"05-memorias")).filter(n=>/^[\da-f-]{36}$/.test(n)),ids);
     const saved=p.events.map((e,i)=>({e,i})).filter(({e})=>e.type==="tool_execution_end"&&e.toolName==="ss_memory_save");assert.equal(saved.length,3);
     for(const {e,i} of saved){assert.equal(e.isError,false);const final=p.events.findIndex((v,j)=>j>i&&finalText(v));assert.ok(final>i,"confirmed tool result must precede final response");}

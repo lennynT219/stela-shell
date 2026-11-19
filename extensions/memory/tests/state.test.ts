@@ -36,7 +36,7 @@ class Fake implements Client {
     return {protocol_version:1,request_id:NEW,operation,result};
   }
   cancel(){this.cancelled++;} async close(){this.closed++;}
-  writes(){return this.calls.filter(c=>["create","update","accept_external","replace_missing","recover"].includes(c.operation));}
+  writes(){return this.calls.filter(c=>["create","update","accept_external","replace_missing","recover","update_sections"].includes(c.operation));}
 }
 function fixture(snapshot:ObjectValue=unbound(),access:Access={read:()=>true,write:()=>true}) {
   const client=new Fake();client.snapshot=snapshot;
@@ -88,11 +88,25 @@ test("specific read denial and expired peer proof are rechecked after asynchrono
 test("normal save confirms exact identity/revision read-back; successor baseline is host-owned full u64",async()=>{
   const {state,client}=fixture();state.human();await state.read();
   const receipt=await state.save(create);assert.equal(receipt.status,"saved");assert.equal(receipt.read_back,"confirmed");
-  assert.equal(client.writes()[0].operation,"create");assert.deepEqual(client.writes()[0].args,{context:{working_directory:cwd,authorized_boundary:cwd},title:create.title,sections:create.sections});
+  assert.equal(client.writes()[0].operation,"create");assert.deepEqual(client.writes()[0].args,{context:{working_directory:cwd,authorized_boundary:cwd},title:create.title,sections:create.sections,summary:create.reason});
   client.snapshot=found("found",9007199254740993n,"exact accepted\r\n");await state.read();
   const next=await state.save({reason:"Useful change",body:"complete body\r\n"});
   assert.equal(next.revision,"9007199254740994");
   assert.deepEqual(client.writes()[1].args,{memory_id:ID,expected:{revision:9007199254740993n,accepted_markdown:"exact accepted\r\n"},body:"complete body\r\n"});
+});
+
+test("section saves send only changed sections with a host-owned exact baseline",async()=>{
+  const {state,client}=fixture(found("found",1,"exact baseline"));
+  state.human();await state.read();
+  const changes={"Outcome status":"Done"};
+  await rejects(state.save({reason:"Changed",changes,body:"Full body"}),"INVALID_INPUT");
+  await rejects(state.save({reason:"Changed",changes:{Unknown:"data"}}),"INVALID_INPUT");
+  assert.deepEqual(client.calls.map(c=>c.operation),["resolve"],"bad section inputs neither re-read nor write");
+  const receipt=await state.save({reason:"Closed a blocker",changes});
+  assert.equal(receipt.read_back,"confirmed");
+  assert.deepEqual(client.writes(),[{operation:"update_sections",args:{
+    memory_id:ID,expected:{revision:1,accepted_markdown:"exact baseline"},changes,summary:"Closed a blocker",
+  }}]);
 });
 
 test("known HTML rejection uses local diagnostics without leaking backend text or retrying",async()=>{

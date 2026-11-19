@@ -24,6 +24,8 @@ export function inBoundary(boundary: string, cwd: string) {
 }
 const memory = (r: ObjectValue): ObjectValue | undefined => object(r.memory) ? r.memory : undefined;
 const id = (r: ObjectValue) => memory(r)?.memory_id;
+export const SECTIONS = ["Objective and scope", "Current decisions", "Outcome status", "Relevant evidence", "Next actions and open questions"] as const;
+const sectionNames: ReadonlySet<string> = new Set(SECTIONS);
 /** Compare exact observed identity/baseline, without interpreting a marker or Markdown. */
 function same(a: ObjectValue, b: ObjectValue): boolean {
   if (a.status !== b.status) return false;
@@ -44,12 +46,17 @@ export function encode(v: unknown): string {
 }
 function input(value: ObjectValue) {
   try { stringify(value, MAX_INPUT_BYTES); } catch { throw new StateError("INVALID_INPUT"); }
-  if (!object(value) || Object.keys(value).some(k => !["action","reason","title","sections","body"].includes(k)) ||
+  if (!object(value) || Object.keys(value).some(k => !["action","reason","title","sections","body","changes"].includes(k)) ||
       typeof value.reason !== "string" || !value.reason.trim() || value.reason.length > 1024 ||
       (value.action !== undefined && !["save","accept_manual","replace_missing"].includes(value.action as string))) throw new StateError("INVALID_INPUT");
+  const changes = value.changes;
+  if (changes !== undefined && ((value.action ?? "save") !== "save" ||
+      value.body !== undefined || value.title !== undefined || value.sections !== undefined ||
+      !object(changes) || !Object.keys(changes).length ||
+      Object.entries(changes).some(([name, content]) => !sectionNames.has(name) || typeof content !== "string"))) throw new StateError("INVALID_INPUT");
 }
 function creation(value: ObjectValue) {
-  if (typeof value.title !== "string" || !value.title.trim() || value.title.length > 256 || value.body !== undefined ||
+  if (typeof value.title !== "string" || !value.title.trim() || value.title.length > 256 || value.body !== undefined || value.changes !== undefined ||
       !Array.isArray(value.sections) || value.sections.length !== 5 || !value.sections.every(s => typeof s === "string")) throw new StateError("INVALID_INPUT");
   return { title: value.title, sections: value.sections };
 }
@@ -163,11 +170,16 @@ export class MemoryState {
       const action = value.action ?? "save", m = memory(base);
       let operation: Operation, args: ObjectValue;
       if (action === "save" && base.status === "unbound") {
-        operation = "create"; args = { context: this.context, ...creation(value) };
+        operation = "create"; args = { context: this.context, ...creation(value), summary: value.reason };
       } else if (action === "save" && base.status === "found" && m) {
-        if (typeof value.body !== "string" || !value.body.trim() || value.title !== undefined || value.sections !== undefined) throw new StateError("INVALID_INPUT");
-        operation = "update"; args = { memory_id: m.memory_id,
-          expected: { revision: m.revision, accepted_markdown: m.accepted_markdown }, body: value.body };
+        if (value.title !== undefined || value.sections !== undefined) throw new StateError("INVALID_INPUT");
+        const expected = { revision: m.revision, accepted_markdown: m.accepted_markdown };
+        if (value.changes !== undefined) {
+          operation = "update_sections"; args = { memory_id: m.memory_id, expected, changes: value.changes, summary: value.reason };
+        } else {
+          if (typeof value.body !== "string" || !value.body.trim()) throw new StateError("INVALID_INPUT");
+          operation = "update"; args = { memory_id: m.memory_id, expected, body: value.body };
+        }
       } else if (action === "accept_manual" && base.status === "manual_review" && m && typeof m.approval_candidate === "string") {
         if (value.body !== undefined || value.title !== undefined || value.sections !== undefined) throw new StateError("INVALID_INPUT");
         operation = "accept_external"; args = { memory_id: m.memory_id,
@@ -187,7 +199,7 @@ export class MemoryState {
           this.check(version,combined,true);
           const observation = response.observation;
           if (response.status !== "found" || !object(observation) || typeof observation.marker !== "string" ||
-              ["current","history","pending","reservation","reassociation"].some(k => observation[k] != null) || observation.history_corrupt !== false)
+              ["current","history","pending","reservation","reassociation","accepted_head"].some(k => observation[k] != null) || observation.history_corrupt !== false)
             throw new StateError("REPLACEMENT_NOT_SAFE", "partial");
           return observation;
         };

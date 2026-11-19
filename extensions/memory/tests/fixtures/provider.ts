@@ -42,8 +42,7 @@ export default function provider(pi:ExtensionAPI) {
           else if(action==="manual")tool("ss_memory_save",{action:"accept_manual",reason:"Accept explicitly reviewed human edit"});
           else if(action==="missing")tool("ss_memory_save",{...create,action:"replace_missing"});
           else if(action==="update"||action==="noop"||action==="conflict"){
-            const raw=state.accepted_markdown??"",body=raw.slice(raw.indexOf("## Objective and scope"));
-            tool("ss_memory_save",{reason:"Verified useful successor",body:action==="noop"?body:body.replace("Fixture scope","Updated fixture scope")});
+            tool("ss_memory_save",{reason:"Verified useful successor",changes:{"Objective and scope":"Updated fixture scope\n\n"}});
           }else tool("ss_memory_save",create);
         }else if(action==="save_abort")tool("fixture_memory_hold",{});
         else{

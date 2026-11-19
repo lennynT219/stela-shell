@@ -191,11 +191,14 @@ limits; Brain alone owns current project continuity.
   selected context. Its normal tool receipt contains metadata only; complete
   accepted Markdown arrives through the next ephemeral context hook, never as an
   extra full-Memory tool-result copy. Never traverse links or search other notes.
-- **`ss_memory_save` / Guardar memoria** — `reason` explains the durable outcome;
-  it is not a permission grant. New unbound context: `title` plus exactly five
-  `sections` in canonical Memory order. Existing Memory: complete successor `body`,
-  without YAML frontmatter, retaining the five top-level H2s, accepted human
-  material and genuine history/optional Project relations. Brain alone parses it.
+- **`ss_memory_save` / Guardar memoria** — give one concise line in `reason`
+  describing what changed and why; it is not a permission grant. New unbound
+  context: `title` plus exactly five `sections` in canonical Memory order.
+  Existing Memory: prefer `changes`, an object keyed by exact canonical title
+  with replacement content for only the changed sections. Omit the H2 from
+  each value; preserve human material and any genuine relations in replaced
+  sections. Brain assembles and validates the document. A complete successor
+  `body` without YAML is retained for compatibility; never send both forms.
 - Exceptional `action: "accept_manual"` asks actual host UI approval for the exact
   observed and approval-candidate bytes. No proposed model body is substituted.
 - Exceptional `action: "replace_missing"` needs creation fields and actual UI
@@ -203,6 +206,11 @@ limits; Brain alone owns current project continuity.
   Raw marker bytes come from Brain's read-only `inspect_recovery`, not an SS file
   read/parser. Artifact/partial/pending states do not qualify. Brain rechecks real
   absence and allocates the new identity; no silent marker replacement.
+
+New ordinary creations use the upgraded Brain's concise dated history. Existing
+full-snapshot histories keep their format; no data is migrated. Brain retains one
+exact accepted baseline for conflict checks. Unchanged section saves do not
+add entries. A concise log is not a restorable archive of earlier contents.
 
 Without dialog-capable UI, exceptional approval stays pending. UI denial, changed
 bytes/binding, input or permission revocation prevents the mutation. Partial/corrupt

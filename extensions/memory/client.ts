@@ -25,7 +25,7 @@ export interface Options {
   environment?: NodeJS.ProcessEnv; maxInputBytes?: number; maxOutputBytes?: number; deadlineMs?: number;
 }
 export interface Dependencies { launch?: Launcher }
-const mutations = new Set<Operation>(["create", "replace_missing", "update", "accept_external", "recover"]);
+const mutations = new Set<Operation>(["create", "replace_missing", "update", "accept_external", "recover", "update_sections"]);
 const validPath = (v: unknown): v is string => typeof v === "string" && isAbsolute(v) && !v.includes("\0");
 const allowedEnvironment = new Set(["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SYSTEMROOT", "TMP", "TEMP", "TMPDIR"]);
 export function minimalEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

@@ -1,6 +1,7 @@
 // Brain owns Memory interpretation. This module validates the v1 transport and
 // typed receipts; returned context/paths/approvals remain untrusted data.
-export const OPERATIONS = ["capabilities", "resolve", "read", "create", "replace_missing", "update", "accept_external", "inspect_recovery", "recover"] as const;
+const LEGACY_OPERATIONS = ["capabilities", "resolve", "read", "create", "replace_missing", "update", "accept_external", "inspect_recovery", "recover"] as const;
+export const OPERATIONS = [...LEGACY_OPERATIONS, "update_sections"] as const;
 export type Operation = typeof OPERATIONS[number];
 export type Value = null | boolean | string | number | bigint | Value[] | { [key: string]: Value };
 export type ObjectValue = { [key: string]: Value };
@@ -103,10 +104,11 @@ function state(v: Value, id: Value) {
 }
 function observation(v: Value, id: Value) {
   if (!record(v)) invalid();
-  keys(v, ["memory_id", "current", "history", "pending", "marker", "reservation", "history_corrupt"], ["reassociation", "history_bytes"]);
+  keys(v, ["memory_id", "current", "history", "pending", "marker", "reservation", "history_corrupt"], ["reassociation", "history_bytes", "accepted_head"]);
   identity(v.memory_id, id);
   if (![v.current, v.history, v.pending, v.marker, v.reservation].every(nullableString) || typeof v.history_corrupt !== "boolean" ||
       (v.reassociation !== undefined && typeof v.reassociation !== "string") ||
+      (v.accepted_head !== undefined && typeof v.accepted_head !== "string") ||
       (v.history_bytes !== undefined && (!Array.isArray(v.history_bytes) || !v.history_bytes.every(n => typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 255)))) invalid();
 }
 export function decode(bytes: Uint8Array, request: Request, inputLimit: number, outputLimit: number): Response {
@@ -127,8 +129,10 @@ export function decode(bytes: Uint8Array, request: Request, inputLimit: number, 
         (r.required_bytes !== undefined && !uint(r.required_bytes))) invalid();
   } else if (request.operation === "capabilities") {
     keys(r, ["status", "protocol_version", "brain_version", "operations", "max_input_bytes", "max_output_bytes", "history_version", "document_version", "lock", "authority", "cancellation"]);
-    if (r.status !== "found" || r.protocol_version !== 1 || r.history_version !== 1 || r.document_version !== 1 || typeof r.brain_version !== "string" ||
-        !Array.isArray(r.operations) || r.operations.length !== OPERATIONS.length || !OPERATIONS.every((op, i) => r.operations[i] === op) ||
+    const versions = r.history_version === 1 ? [LEGACY_OPERATIONS] : r.history_version === 2 ? [OPERATIONS] : [];
+    const supported = Array.isArray(r.operations) ? r.operations : [];
+    if (r.status !== "found" || r.protocol_version !== 1 || r.document_version !== 1 || typeof r.brain_version !== "string" ||
+        !versions.some(ops => supported.length === ops.length && ops.every((op,i) => supported[i] === op)) ||
         r.max_input_bytes !== inputLimit || r.max_output_bytes !== outputLimit || r.lock !== "std_try_lock" || r.authority !== "trusted_local_caller" ||
         r.cancellation !== "host_terminates_process; mutation_confirmation_may_be_lost") invalid();
   } else if (request.operation === "read") state(r, a.memory_id);
@@ -156,7 +160,7 @@ export function decode(bytes: Uint8Array, request: Request, inputLimit: number, 
     keys(r, ["status", "memory_id", "revision", "request_id"], request.operation === "replace_missing" ? ["replaced_memory_id"] : []);
     identity(r.memory_id, request.operation === "create" || request.operation === "replace_missing" ? undefined : a.memory_id);
     identity(r.request_id, request.operation === "recover" ? undefined : request.request_id);
-    if (!uint(r.revision) || !(r.status === "saved" || (request.operation === "update" && r.status === "unchanged"))) invalid();
+    if (!uint(r.revision) || !(r.status === "saved" || ((request.operation === "update" || request.operation === "update_sections") && r.status === "unchanged"))) invalid();
     if (request.operation === "create" && r.revision !== 1) invalid();
     if (request.operation === "replace_missing") {
       identity(r.replaced_memory_id, a.expected_memory_id);
