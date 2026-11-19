@@ -2,12 +2,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { callRenderer, type MakeText } from "../presentation.ts";
 import { MemoryState, StateError, CONTEXT_TYPE, POLICY, SECTIONS, encode, failure, type Client, type Configuration, type PublicationFence } from "./state.ts";
 import { minimalEnvironment } from "./client.ts";
-import { configuredVaultGuard } from "./configuration.ts";
+import { configuredVaultGuard, observeConfiguredVault } from "./configuration.ts";
 import { ExecutableError, selectExecutable, resolveExecutable, type ExecutableSelection } from "./executable.ts";
 import { isAbsolute } from "node:path";
 import type { ObjectValue } from "./protocol.ts";
 import { primaryActivity, type PrimaryActivity } from "../primary-activity.ts";
 import { localDiagnostic } from "./diagnostics.ts";
+import { registerProjectAssociation } from "../project-association.ts";
 
 export interface Dependencies {
   env?: NodeJS.ProcessEnv;
@@ -35,12 +36,13 @@ export function registerMemory(pi: ExtensionAPI, dependencies: Dependencies = {}
   let generation = 0, configured = false, configurationError: string | undefined;
   let closing: Promise<void> = Promise.resolve();
   let lastPrimaryActivity: PrimaryActivity | undefined;
+  let closeProjectAssociation: (() => void) | undefined;
   const fence: PublicationFence = { uncertain:false };
   const settings = (ctx: ExtensionContext) => {
     if (!isAbsolute(ctx.cwd) || ctx.cwd.includes("\0")) throw new StateError("INVALID_CONFIGURATION");
     return { selection:selectExecutable(environment),environment:minimalEnvironment(environment) };
   };
-  const owns = (ctx: ExtensionContext, selected = state) => !!selected && selected === state && manager === ctx.sessionManager &&
+  const owns = (ctx: Pick<ExtensionContext, "sessionManager" | "cwd">, selected = state) => !!selected && selected === state && manager === ctx.sessionManager &&
     sessionId === ctx.sessionManager.getSessionId() && selected.cwd === ctx.cwd;
   const active = (name: string) => pi.getActiveTools().includes(name);
   const syncActivity = (ctx: ExtensionContext): string | undefined => {
@@ -66,6 +68,7 @@ export function registerMemory(pi: ExtensionAPI, dependencies: Dependencies = {}
   };
   const stop = async () => {
     ++generation; const old = state; state = undefined; manager = undefined; sessionId = undefined; lastPrimaryActivity = undefined;
+    closeProjectAssociation?.(); closeProjectAssociation = undefined;
     // Concurrent navigation/start hooks must all observe the outstanding close.
     // Clearing state is not proof that its process has finished cancellation.
     if (old) closing = Promise.all([closing,old.close()]).then(() => undefined);
@@ -102,6 +105,14 @@ export function registerMemory(pi: ExtensionAPI, dependencies: Dependencies = {}
         confirm:ctx.hasUI ? (title: string,message: string,signal: AbortSignal) => ctx.ui.confirm(title,message,{signal}) : undefined,
       };
       state = new MemoryState(ctx.cwd,config,access,dependencies.client?.(ctx,config),fence,childEnvironment);
+      const owner = state;
+      if (config.vault === undefined && config.boundary === ctx.cwd) {
+        const selectedEnvironment = JSON.stringify(Object.entries(childEnvironment).sort(([a], [b]) => a.localeCompare(b)));
+        closeProjectAssociation = registerProjectAssociation(ctx, (candidate, target) =>
+          owns(candidate, owner) && target.executable === config.executable && target.environment === selectedEnvironment &&
+          target.vaultScope !== undefined && target.vaultScope === observeConfiguredVault(childEnvironment)
+            ? owner.reserveAssociation() : undefined);
+      }
       status(ctx,{status:"pending",code:"ACTIVITY_REQUIRED"});
     } catch (error) {
       configurationError = error instanceof ExecutableError ? error.code : "INVALID_CONFIGURATION";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -65,6 +65,15 @@ test("isolated Pi + Brain: create and recover a named Project note in a fresh re
     const [listed, created] = await freshPi(root, work, "write", input);
     assert.deepEqual(listed, { status: "listed", notes: [] });
     assert.equal(created?.status, "created", JSON.stringify(created));
+    const notes = join(root, "vault", "01-proyectos", "fixture", "notas");
+    const noteFile = join(notes, "Naming conventions.md");
+    const markdown = readFileSync(noteFile, "utf8");
+    const bodyStart = markdown.indexOf("\n---\n") + "\n---\n".length;
+    assert.ok(bodyStart > "\n---\n".length);
+    const frontmatter = markdown.slice(0, bodyStart);
+    assert.match(frontmatter, /^project_link: "\[\[01-proyectos\/fixture\/Fixture\]\]"$/m);
+    assert.equal(markdown.slice(bodyStart), expected);
+    assert.equal(existsSync(join(notes, `${created.note_id}.md`)), false);
     const [found] = await freshPi(root, work, "read", input, created.note_id);
     assert.deepEqual(found, { status: "found", note_id: created.note_id, title: "Naming conventions", body: expected });
     assert.deepEqual(await freshPi(root, work, "read", input, outsider), [{ status: "not_found" }]);
@@ -73,6 +82,7 @@ test("isolated Pi + Brain: create and recover a named Project note in a fresh re
     const [beforeUpdate, updated] = await freshPi(root, work, "update", input, created.note_id);
     assert.deepEqual(beforeUpdate, found);
     assert.deepEqual(updated, { status: "updated", note_id: created.note_id, title: "Naming conventions" });
+    assert.equal(readFileSync(noteFile, "utf8"), frontmatter + revised);
     assert.deepEqual(await freshPi(root, work, "read", input, created.note_id), [{ ...found, body: revised }]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

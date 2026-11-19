@@ -56,6 +56,18 @@ test("host scope, authorized activity and current tool permissions cannot be sup
   assert.throws(()=>new MemoryState(join(cwd,"..","other"),config,{read:()=>true,write:()=>true},client),StateError);
 });
 
+test("confirmed Project commands reserve Memory and propagate uncertain writes",async()=>{
+  const {state,client,fence}=fixture(found());state.human();await state.read();
+  const reserved=state.reserveAssociation();assert.ok(reserved?.valid());
+  await rejects(state.read(),"BUSY");assert.equal(state.reserveAssociation(),undefined);
+  reserved!.finish("uncertain");assert.equal(fence.uncertain,true);assert.equal(state.loaded,false);
+  assert.equal(state.reserveAssociation(),undefined);
+  await state.read(undefined,true);assert.equal(fence.uncertain,false);
+  const confirmed=state.reserveAssociation();assert.ok(confirmed?.valid());
+  confirmed!.finish("bound");assert.equal(state.loaded,false);assert.equal(fence.uncertain,false);
+  assert.equal(client.writes().length,0,"the bridge itself never publishes Memory");
+});
+
 test("agentic readiness is live proof, not permanent human initialization",async()=>{
   const {state,client}=fixture();let valid=true;
   state.agentic(()=>valid);assert.equal(state.ready,true);await state.read();

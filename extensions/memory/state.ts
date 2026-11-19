@@ -70,6 +70,7 @@ export class MemoryState {
   private peerActivity?: () => boolean;
   private closed = false;
   private busy = false;
+  private association = false;
   private active?: AbortController;
   private snapshot?: ObjectValue;
   private last = "not_loaded";
@@ -111,6 +112,23 @@ export class MemoryState {
   get ready() { return this.activationError() === undefined; }
   get loaded() { return this.snapshot !== undefined; }
   get needsLookup() { return this.last === "not_loaded"; }
+  /** Reserved only by the human Project command; separate from model Memory activity. */
+  reserveAssociation() {
+    if (this.closed || this.busy || this.association || this.fence.uncertain || !this.access.read() || !this.access.write()) return;
+    const version = this.version;
+    this.association = true;
+    let finished = false;
+    return {
+      valid: () => !finished && !this.closed && this.version === version && !this.fence.uncertain && this.access.read() && this.access.write(),
+      finish: (outcome: "not_applied" | "bound" | "uncertain") => {
+        if (finished) return;
+        finished = true;
+        this.association = false;
+        if (outcome === "uncertain") this.fence.uncertain = true;
+        if (outcome !== "not_applied") this.invalidate();
+      },
+    };
+  }
   view(): ObjectValue {
     this.requireRead();
     if (!this.snapshot) return { status: this.last, write_paused: this.fence.uncertain };
@@ -127,7 +145,7 @@ export class MemoryState {
     if (write && !this.access.write()) throw new StateError("WRITE_DISABLED");
   }
   private async run<T>(signal: AbortSignal | undefined, work: (version: number, signal: AbortSignal) => Promise<T>): Promise<T> {
-    if (this.busy) throw new StateError("BUSY", "busy");
+    if (this.busy || this.association) throw new StateError("BUSY", "busy");
     const version = this.version, controller = new AbortController(), abort = () => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) controller.abort();
