@@ -1,2 +1,7 @@
-binding_version = 1
+binding_version = 2
 memory_id = "90b7ac42-fca7-451d-acef-5fe0fcd4db0a"
+
+[principal_project]
+project_id = "06088a54-3732-4408-b60c-7f7656cb5b0a"
+project_path = "01-proyectos/stelashell-06088a54-3732-4408-b60c-7f7656cb5b0a/StelaShell.md"
+allow_write = true
