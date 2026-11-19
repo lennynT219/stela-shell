@@ -19,6 +19,16 @@ Use the actual Project identity, not a Memory ID. The Project has its own `notas
 - **Write:** both `allow_write = true` and explicit activation of the relevant Pi tool are required. The write tools are inactive by default and do not take peer activity as a write grant. `ss_knowledge_create` requires a current list so the existing notes can be checked for a canonical home; `ss_knowledge_update` requires a fresh read in the session. The exact baseline stays in host memory; only the body is replaced. The update can fail with `conflict` if the backing note changed.
 - After `save_unconfirmed`, stop writes. Inspect Brain with a new explicit read or list; that may establish current state, not recover a missing receipt. The extension pauses writes on that runtime; resolve the uncertainty before starting a new authorized write session. Do not retry or create another note to compensate. Brain serializes cooperating writers; external editors that disregard its lock are not universally covered.
 
-For the naming pilot, copy the complete current naming document into one scoped note, then read it from a fresh read-only session and compare the complete body (including compatibility exceptions). Check repository references before retiring the old document; a pilot in a temporary vault is not publication in the canonical vault.
+## StelaShell Project notes
 
-The opt-in integration test takes `SS_TEST_PI_CLI` and `SS_TEST_BRAIN_NOTES_EXE`, writes only to an isolated fixture vault, and uses a deterministic Pi RPC provider without inference network calls.
+With the StelaShell Brain Project bound as principal, use `ss_knowledge_list` and then `ss_knowledge_read` with the listed `note_id`. In Obsidian, open the Project's `notas/` folder. These are the durable references migrated from the former repository `docs/` collection:
+
+- **Naming conventions**
+- **Arquitectura y hoja de ruta de StelaShell**
+- **Contrato de continuidad con Brain**
+- **Contrato de colaboración entre sesiones PRIMARY**
+- **Diseño de búsqueda web y lectura pública**
+
+The design notes name their historical Git sources. Runtime setup, diagnostics and license notices remain beside their corresponding code. The selected Brain Memory holds current state. These lookup instructions do not migrate other folders or enable writes.
+
+The opt-in integration test takes `SS_TEST_PI_CLI` and `SS_TEST_BRAIN_NOTES_EXE`, writes only to an isolated fixture vault, and uses a synthetic note and a deterministic Pi RPC provider without inference network calls.
