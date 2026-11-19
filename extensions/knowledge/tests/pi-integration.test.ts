@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const cli = process.env.SS_TEST_PI_CLI, brain = process.env.SS_TEST_BRAIN_NOTES_EXE;
 const provider = fileURLToPath(new URL("./fixtures/provider.ts", import.meta.url));
 const extension = fileURLToPath(new URL("../index.ts", import.meta.url));
-const source = fileURLToPath(new URL("../../../docs/NAMING.md", import.meta.url));
+const expected = "# Naming conventions\r\n\r\n## Example\r\n\r\nNota sintética para verificar acentos y finales de línea.\r\n";
 const projectID = "11111111-1111-4111-8111-111111111111", outsider = "22222222-2222-4222-8222-222222222222";
 
 function prepare(root: string) {
@@ -57,14 +57,10 @@ async function freshPi(root: string, work: string, mode: "write" | "read" | "upd
   } finally { lines.close(); child.stdin.end(); if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await closed; clearTimeout(timeout); }
 }
 
-test("isolated Pi + Brain: create and recover the naming contract in a fresh read-only session", { skip: !cli || !brain, timeout: 50_000 }, async () => {
+test("isolated Pi + Brain: create and recover a named Project note in a fresh read-only session", { skip: !cli || !brain, timeout: 50_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "ss-knowledge-pi-"));
   try {
     const work = prepare(root);
-    // Keep the integration test useful after the migration has retired the source.
-    let expected: string;
-    try { expected = readFileSync(source, "utf8"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; expected = "# Naming conventions\n\nUse the scoped fixture note.\n"; }
     const input = join(root, "source.md"); writeFileSync(input, expected);
     const [listed, created] = await freshPi(root, work, "write", input);
     assert.deepEqual(listed, { status: "listed", notes: [] });
