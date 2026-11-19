@@ -92,6 +92,8 @@ A scope-decision pause is not the same as a technical blocker: the former requir
 
 #### Selection and relevance
 
+- When an authorized Brain knowledge integration is available and a task depends on a durable contract, convention or design decision, selectively consult its canonical project note. Do not preload the catalog or follow links as authority. Keep operational state in Memory and enduring rules in notes; do not create a competing repository copy or assume read access grants note writes.
+
 - Treat Memory as a consolidated snapshot for resuming the project, not a conversation history or activity log. A completed request does not by itself justify a save.
 - Publish only information that changes future decisions, constraints, relevant outcome states, blockers or next actions, or supplies evidence needed to resume the active objective. When ordinary Memory maintenance is authorized, explicit consequential user decisions and restrictions belong in the current work cycle. Incorporate later confirmations/corrections in the existing entry without promoting unverified details to facts.
 - Do not routinely persist query results, commands, exit codes, greetings, prompts, raw transcripts or resolved incidental errors. Keep specific evidence only when subsequent work needs it; reference detailed artifacts instead of copying them wholesale.

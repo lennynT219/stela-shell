@@ -367,6 +367,7 @@ test("package retains session coverage and owned extensions with the configured 
     "./extensions/sessions/index.ts",
     "./extensions/web/index.ts",
     "./extensions/memory/index.ts",
+    "./extensions/knowledge/index.ts",
   ]);
   assert.match(manifest.scripts.test, /extensions\/sessions\/tests\/\*\.test\.ts/);
   assert.match(manifest.scripts.test, /extensions\/web\/tests\/\*\.test\.ts/);
