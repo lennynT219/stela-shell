@@ -138,6 +138,17 @@ test("normal tool surfaces name permission hints and pre-final policy without mo
   assert.equal(h.flags.size,0,"Memory registers no startup flags");assert.equal(h.tools.has("ss_memory_stage"),false);
 });
 
+test("Spanish Memory authoring policy reaches the system prompt and save tool guidance",async()=>{
+  const h=host();await h.emit("session_start");await h.emit("input",{source:"rpc"});
+  const prompt=await h.emit("before_agent_start",{systemPrompt:"BASE"});
+  for(const guidance of [prompt.systemPrompt,h.tools.get("ss_memory_save").promptGuidelines.join("\n")]) {
+    assert.match(guidance,/new Memory titles and section content in Spanish/);
+    assert.match(guidance,/reason recorded in Historial\.md in Spanish/);
+    assert.match(guidance,/Keep canonical section headings, tool names, and identifiers unchanged/);
+    assert.match(guidance,/Do not translate or rewrite existing content just to change its language/);
+  }
+});
+
 test("format guidance and allowlisted rejection reach the tool result and Spanish status safely",async()=>{
   for(const reason of ["UNCLOSED_HTML","UNKNOWN_PRIVATE_REASON",undefined]) {
     const h=host({rejection:{status:"invalid",message:"PRIVATE_BACKEND_TEXT",...(reason?{reason}:{})}});
