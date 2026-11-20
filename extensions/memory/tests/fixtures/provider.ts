@@ -41,8 +41,16 @@ export default function provider(pi:ExtensionAPI) {
           else if(action==="read")tool("ss_memory_read",{});
           else if(action==="manual")tool("ss_memory_save",{action:"accept_manual",reason:"Accept explicitly reviewed human edit"});
           else if(action==="missing")tool("ss_memory_save",{...create,action:"replace_missing"});
+          else if(action==="ambiguous"||action==="index_ready"){
+            const qualified=action==="index_ready";
+            tool("ss_memory_save",{reason:"El índice ya está listo.",edits:[{section:"Relevant evidence",
+              oldText:qualified?"Índice: pendiente.":"pendiente.",newText:qualified?"Índice: listo.":"listo."}]});
+          }
+          else if(action==="edit")tool("ss_memory_save",{reason:"Se verificó la evidencia.",edits:[
+            {section:"Relevant evidence",oldText:"Initial status",newText:"Verificado."},
+          ]});
           else if(action==="update"||action==="noop"||action==="conflict"){
-            tool("ss_memory_save",{reason:"Verified useful successor",changes:{"Objective and scope":"Updated fixture scope\n\n"}});
+            tool("ss_memory_save",{reason:"Verified useful successor",changes:{"Objective and scope":"Updated fixture scope"}});
           }else tool("ss_memory_save",create);
         }else if(action==="save_abort")tool("fixture_memory_hold",{});
         else{

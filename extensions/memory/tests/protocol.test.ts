@@ -12,6 +12,18 @@ test("validation reason uses the existing failure envelope without a new protoco
   assert.throws(()=>decode(envelope({status:"invalid",message:"Untrusted",code:"UNCLOSED_HTML"}),request,1024,1024),ProtocolError,"v1 does not silently accept a new backend field");
 });
 
+test("a correlated fragment receipt must confirm exactly one revision or the original no-op revision",()=>{
+  const request_id="550e8400-e29b-41d4-a716-446655440001",memory_id="550e8400-e29b-41d4-a716-446655440002",base=9007199254740993n;
+  const operation="update_sections",request:Request={protocol_version:1,request_id,operation,arguments:{memory_id,
+    expected:{revision:base,accepted_markdown:"original"},edits:[{section:"Outcome status",oldText:"a",newText:"b"}],summary:"test"}};
+  const decodeAt=(status:string,revision:bigint)=>decode(Buffer.from(stringify({protocol_version:1,request_id,operation,
+    result:{status,request_id,memory_id,revision}},4096)+"\n"),request,4096,4096);
+  assert.equal(decodeAt("saved",base+1n).result.status,"saved");
+  assert.equal(decodeAt("unchanged",base).result.status,"unchanged");
+  for(const delta of [-1n,0n,2n])assert.throws(()=>decodeAt("saved",base+delta),ProtocolError);
+  assert.throws(()=>decodeAt("unchanged",base+1n),ProtocolError);
+});
+
 test("bounded serialization counts actual dense array contents and never runs custom serialization",()=>{
   const input={list:Array.from({length:300},()=>0)},expected=JSON.stringify(input);
   // Independently expected 2*N+10 bytes: 300 zeros,299 commas and11 wrapper bytes.

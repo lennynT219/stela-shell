@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { callRenderer, type MakeText } from "../presentation.ts";
-import { MemoryState, StateError, CONTEXT_TYPE, POLICY, SECTIONS, encode, failure, type Client, type Configuration, type PublicationFence } from "./state.ts";
+import { MemoryState, StateError, CONTEXT_TYPE, POLICY, SECTIONS, MAX_SECTION_EDITS, encode, failure, type Client, type Configuration, type PublicationFence } from "./state.ts";
 import { minimalEnvironment } from "./client.ts";
 import { configuredVaultGuard, observeConfiguredVault } from "./configuration.ts";
 import { ExecutableError, selectExecutable, resolveExecutable, type ExecutableSelection } from "./executable.ts";
@@ -25,8 +25,12 @@ const properties = {
   reason:{ type:"string",minLength:1,maxLength:1024,description:"One concise line with what changed and why, no secrets or copied Memory content. It becomes a log entry for normal log saves; not a permission grant." },
   title:{ type:"string",minLength:1,maxLength:256,description:"New Memory title; only for an unbound context or approved missing-reference replacement." },
   sections:{ type:"array",minItems:5,maxItems:5,items:{type:"string"},description:"For creation only: complete Objective and scope / Current decisions / Outcome status / Relevant evidence / Next actions and open questions. Put literal placeholder paths/templates in inline code or escape angle brackets, not raw HTML." },
-  changes:{ type:"object",additionalProperties:false,minProperties:1,properties:Object.fromEntries(SECTIONS.map(name => [name,{type:"string"}])),description:"Preferred for an existing Memory: only changed sections, keyed by exact title. Each value replaces the entire content under that heading (omit the H2); retain accepted human material and genuine links in changed sections. Use inline code for literal placeholders. Do not supply body with changes." },
-  body:{ type:"string",minLength:1,description:"Compatibility full replacement for an existing Memory only; prefer changes. Complete successor BODY without YAML, preserving five H2s, manual material and genuine links. Put literal placeholders in inline code; never silently rewrite accepted bytes." },
+  edits:{ type:"array",minItems:1,maxItems:MAX_SECTION_EDITS,description:"Preferred for small changes: match each oldText exactly once inside the original named section (not its H2). No overlapping matches. Use newText to replace, extend the match, or delete it with an empty string. Do not combine with changes or body.",
+    items:{ type:"object",additionalProperties:false,required:["section","oldText","newText"],properties:{
+      section:{type:"string",enum:SECTIONS},oldText:{type:"string",minLength:1,description:"If both 'Portada: pendiente.' and 'Índice: pendiente.' occur, match 'Índice: pendiente.' rather than the ambiguous 'pendiente.' to update the index."},newText:{type:"string"},
+    } } },
+  changes:{ type:"object",additionalProperties:false,minProperties:1,properties:Object.fromEntries(SECTIONS.map(name => [name,{type:"string"}])),description:"Whole-section replacements for an existing Memory, keyed by exact title. Omit each H2; retain accepted human material and genuine links. Before another H2, omit trailing line breaks to keep the existing separator; supply an explicit ending only to change it. Do not combine with edits or body." },
+  body:{ type:"string",minLength:1,description:"Compatibility full replacement for an existing Memory only. Complete successor BODY without YAML, preserving five H2s, manual material and genuine links. Put literal placeholders in inline code; never silently rewrite accepted bytes." },
 };
 /** Loading the extension authorizes ordinary Memory use, not exceptional approval. */
 export function registerMemory(pi: ExtensionAPI, dependencies: Dependencies = {}): void {
@@ -179,7 +183,7 @@ export function registerMemory(pi: ExtensionAPI, dependencies: Dependencies = {}
   });
   pi.registerTool({
     name:"ss_memory_save",label:"Guardar memoria",
-    description:"Publish useful current work state through normal Pi permission hooks BEFORE the final reply, then report its actual result. Loading this extension authorizes ordinary read/save use; current tool controls can still deny. New context: title + five sections. Existing Memory: prefer changes by canonical section; complete body without YAML is compatible. No model-selected identity/path/baseline/approval. Exceptional accept_manual/replace_missing actions ask real UI approval for exact bytes. No startup/completion-hook save, hidden model, retry, rollback, repair or new identity after uncertainty.",
+    description:"Publish useful current work state through normal Pi permission hooks BEFORE the final reply, then report its actual result. Loading this extension authorizes ordinary read/save use; current tool controls can still deny. New context: title + five sections. Existing Memory: prefer edits for localized changes; use changes for whole sections or body for a complete successor without YAML. No model-selected identity/path/baseline/approval. Exceptional accept_manual/replace_missing actions ask real UI approval for exact bytes. No startup/completion-hook save, hidden model, retry, rollback, repair or new identity after uncertainty.",
     promptSnippet:"Save meaningful authorized work state and observe confirmation BEFORE the final response",
     promptGuidelines:[POLICY,"Create only after useful work, never merely because this tool is available or a greeting occurred. Preserve every still-valid decision/constraint/manual fact; do not copy conversations or secrets. A failed save does not block unrelated work: state failed/pending/unconfirmed truthfully in the final answer."],
     annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},

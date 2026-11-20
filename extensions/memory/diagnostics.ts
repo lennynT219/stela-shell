@@ -13,6 +13,9 @@ const DIAGNOSTICS: Record<string, { label: string; message: string }> = {
   CONFIGURATION_CHANGED: { label: "configuración cambiada", message: "Cambió la configuración observada de Brain. El propietario anterior no puede adoptarla automáticamente." },
   SCOPE_CHECK_FAILED: { label: "contexto no verificable", message: "No se pudo verificar que el contexto autorizado de Memory siga vigente." },
   EXECUTABLE_NOT_FOUND: { label: "Brain no encontrado", message: "Esta activación no pudo resolver Brain con su selección y entorno. No se instaló ni cambió la configuración." },
+  EDIT_NOT_FOUND: { label: "texto no encontrado", message: "El texto original no aparece en la sección indicada. No se aplicó ninguna edición." },
+  EDIT_AMBIGUOUS: { label: "texto ambiguo", message: "El texto original aparece más de una vez en esa sección. Usa un fragmento único. No se aplicó ninguna edición." },
+  EDITS_OVERLAP: { label: "ediciones solapadas", message: "Las ediciones se solapan en el contenido original. Combínalas en una sola. No se aplicó ninguna edición." },
   UNCLOSED_HTML: { label: "HTML sin cerrar", message: "El documento contiene HTML sin cerrar. Usa código en línea o escapa los marcadores literales; no se reintentó el guardado." },
 };
 export function localDiagnostic(code: unknown) {

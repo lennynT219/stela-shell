@@ -113,12 +113,67 @@ test("section saves send only changed sections with a host-owned exact baseline"
   const changes={"Outcome status":"Done"};
   await rejects(state.save({reason:"Changed",changes,body:"Full body"}),"INVALID_INPUT");
   await rejects(state.save({reason:"Changed",changes:{Unknown:"data"}}),"INVALID_INPUT");
+  await rejects(state.save({reason:"Changed",changes,require_preserved_separator:false}),"INVALID_INPUT");
   assert.deepEqual(client.calls.map(c=>c.operation),["resolve"],"bad section inputs neither re-read nor write");
   const receipt=await state.save({reason:"Closed a blocker",changes});
   assert.equal(receipt.read_back,"confirmed");
   assert.deepEqual(client.writes(),[{operation:"update_sections",args:{
-    memory_id:ID,expected:{revision:1,accepted_markdown:"exact baseline"},changes,summary:"Closed a blocker",
+    memory_id:ID,expected:{revision:1,accepted_markdown:"exact baseline"},changes,summary:"Closed a blocker",require_preserved_separator:true,
   }}]);
+});
+
+test("only batches relying on an implicit inter-section separator need the compatibility guard",async()=>{
+  const cases: [Record<string,string>,boolean][] = [
+    [{"Outcome status":"", "Relevant evidence":"E\n\n"},true],
+    [{"Outcome status":"E\r\n", "Current decisions":"D\r", "Next actions and open questions":"no final EOL"},false],
+    [{"Next actions and open questions":""},false],
+  ];
+  for (const [changes, guarded] of cases) {
+    const {state,client}=fixture(found());state.human();await state.read();
+    client.intercept=async op=>op==="update_sections" && guarded ? {status:"invalid"} : undefined;
+    const receipt=await state.save({reason:"Actualización de la sección.",changes});
+    const writes=client.writes();assert.equal(writes.length,1,"never retry without the guard");
+    assert.deepEqual(writes[0].args.changes,changes);assert.equal(writes[0].args.require_preserved_separator,guarded?true:undefined);
+    assert.equal(receipt.status,guarded?"invalid":"saved");
+  }
+});
+
+test("fragment saves forward one exact batch and the host baseline; no fallback on rejection",async()=>{
+  const edits=[{section:"Relevant evidence",oldText:"  línea\r\n",newText:""},
+    {section:"Outcome status",oldText:"pendiente",newText:"listo"}];
+  const reason="Resultado verificado",original="exacta\r\n";
+  for(const rejection of [undefined,"EDIT_NOT_FOUND","EDIT_AMBIGUOUS","EDITS_OVERLAP","legacy","unknown"]) {
+    const {state,client}=fixture(found("found",5,original));state.human();await state.read();
+    if(rejection)client.intercept=async op=>op==="update_sections"?{status:"invalid",message:"PRIVATE",...(rejection==="legacy"?{}:{reason:rejection})}:undefined;
+    const receipt=await state.save({reason,edits});
+    assert.deepEqual(client.writes(),[{operation:"update_sections",args:{memory_id:ID,expected:{revision:5,accepted_markdown:original},edits,summary:reason}}]);
+    if(!rejection)assert.equal(receipt.read_back,"confirmed");
+    else {
+      assert.equal(receipt.status,"invalid");assert.equal(receipt.code,rejection.startsWith("EDIT")?rejection:undefined);
+      assert.doesNotMatch(encode(receipt),/PRIVATE|exacta/);
+      assert.deepEqual(client.calls.map(c=>c.operation),["resolve","resolve","update_sections"]);
+    }
+  }
+});
+
+test("edits reject mixed modes and invalid shapes before I/O; valid edits cannot create, approve or rebase",async()=>{
+  const {state,client}=fixture(found());state.human();await state.read();
+  const e={section:"Outcome status",oldText:"antes",newText:"después"};
+  for(const invalid of [null,{},[],[null],[{...e,section:"bogus"}],[{...e,oldText:""}],[{...e,newText:null}],
+    [{...e,expected:"fake"}],[{section:e.section,oldText:e.oldText}],Array(33).fill(e)]) {
+    await rejects(state.save({reason:"R",edits:invalid}),"INVALID_INPUT");
+  }
+  for(const other of [{body:"other"},{changes:{}},{title:"new"},{sections:[]},{action:"replace_missing"},{action:"accept_manual"}])
+    await rejects(state.save({reason:"R",edits:[e],...other}),"INVALID_INPUT");
+  assert.deepEqual(client.calls.map(c=>c.operation),["resolve"]);
+  const edit={reason:"R",edits:[e]};
+  client.snapshot=found("found",2);await rejects(state.save(edit),"BASELINE_CHANGED");
+  assert.equal(client.writes().length,0);
+  for(const snapshot of [unbound(),found("manual_review"),found("not_found"),found("partial")]) {
+    const f=fixture(snapshot);f.state.human();await f.state.read();
+    await rejects(f.state.save(edit),snapshot.status==="unbound"?"INVALID_INPUT":"REVIEW_REQUIRED");
+    assert.equal(f.client.writes().length,0);
+  }
 });
 
 test("known HTML rejection uses local diagnostics without leaking backend text or retrying",async()=>{

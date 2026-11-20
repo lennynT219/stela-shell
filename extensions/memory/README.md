@@ -194,11 +194,39 @@ limits; Brain alone owns current project continuity.
 - **`ss_memory_save` / Guardar memoria** — give one concise line in `reason`
   describing what changed and why; it is not a permission grant. New unbound
   context: `title` plus exactly five `sections` in canonical Memory order.
-  Existing Memory: prefer `changes`, an object keyed by exact canonical title
-  with replacement content for only the changed sections. Omit the H2 from
-  each value; preserve human material and any genuine relations in replaced
-  sections. Brain assembles and validates the document. A complete successor
-  `body` without YAML is retained for compatibility; never send both forms.
+  For an existing Memory, use **one** of these forms:
+  - `edits`: for localized updates, including several fragments across sections.
+    If `Outcome status` contains both `Portada: pendiente.` and `Índice: pendiente.`,
+    `pendiente.` alone is ambiguous. To update only the index, include its label:
+    ```json
+    {"reason":"El índice ya está listo.","edits":[{"section":"Outcome status","oldText":"Índice: pendiente.","newText":"Índice: listo."}]}
+    ```
+    Each nonempty `oldText` must occur exactly once inside the named canonical
+    section's content (not its H2). Matching is literal, including line endings.
+    To insert after an anchor, include the anchor followed by the addition in
+    `newText`; to delete the match, send an empty string. Up to 32 edits form one
+    batch; all match the original accepted version, never each other's output.
+    A missing, ambiguous, overlapping or invalid edit rejects the whole batch.
+  - `changes`: replace whole sections by canonical title, not as a fallback for
+    a rejected edit. Omit each H2 and preserve human material and genuine links.
+    Before another H2, normally send the content **without a final line break**:
+    Brain keeps the existing separator, rather than imposing a blank line or
+    removing one. For example, replacing the text in `Pendiente.\n\n## Relevant evidence`
+    with `Listo.` produces `Listo.\n\n## Relevant evidence`. To change the
+    separation deliberately, supply the exact ending: `Listo.\n` leaves no
+    blank line before the next H2. This rule does not add a newline at EOF.
+  - `body`: complete successor body without YAML, retained for compatibility.
+
+  Only the model-authored arguments shrink. StelaShell still supplies the private
+  exact baseline, and Brain still checks it, identifies Markdown sections, validates
+  the result and publishes it under the same history and read-back rules. No extra
+  model call or capability probe. Fragment edits require a Brain that accepts
+  `edits` on `update_sections`; older binaries reject it without a write.
+  When a whole-section batch relies on the existing separator, SS sends
+  `require_preserved_separator: true` privately to Brain. Older binaries reject
+  that request rather than silently losing spacing. Explicit endings and
+  last-section-only replacements need no such precondition. No automatic retry
+  or fallback to rewriting sections or the document.
 - Exceptional `action: "accept_manual"` asks actual host UI approval for the exact
   observed and approval-candidate bytes. No proposed model body is substituted.
 - Exceptional `action: "replace_missing"` needs creation fields and actual UI
@@ -229,8 +257,9 @@ SS does not parse or automatically rewrite the Markdown, omit useful content,
 normalize accepted bytes or weaken Brain's validation to make a save pass.
 
 Brain may return `status: invalid` with the existing v1 failure field
-`reason: UNCLOSED_HTML`. SS maps only that exact status/reason pair to
-`code: UNCLOSED_HTML` and a fixed local Spanish explanation, including advice to
+`reason: UNCLOSED_HTML`. For fragment edits, `EDIT_NOT_FOUND`, `EDIT_AMBIGUOUS`
+and `EDITS_OVERLAP` also have fixed local Spanish diagnostics on `invalid`.
+For `UNCLOSED_HTML`, SS returns a fixed local Spanish explanation with advice to
 use inline code or escapes. The status line reads
 `Memoria · contenido inválido · HTML sin cerrar`; the tool still reports an error,
 not a saved receipt. Raw backend messages, document fragments, paths and unknown

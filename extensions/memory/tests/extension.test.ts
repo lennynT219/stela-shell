@@ -133,8 +133,14 @@ test("overlapping navigation startups wait for the same owned client close befor
 test("normal tool surfaces name permission hints and pre-final policy without model authority arguments",()=>{
   const h=host(),read=h.tools.get("ss_memory_read"),save=h.tools.get("ss_memory_save");
   assert.equal(read.annotations.readOnlyHint,true);assert.equal(save.annotations.readOnlyHint,false);assert.equal(save.label,"Guardar memoria");
-  for(const name of ["vault","executable","cwd","memory_id","expected","human_approved"])assert.equal(Object.hasOwn(save.parameters.properties,name),false);
+  for(const name of ["vault","executable","cwd","memory_id","expected","human_approved","require_preserved_separator"])assert.equal(Object.hasOwn(save.parameters.properties,name),false);
   assert.equal(save.parameters.additionalProperties,false);assert.match(save.promptGuidelines.join("\n"),/No later\/post-response save/);
+  const {edits}=save.parameters.properties;
+  assert.deepEqual(edits.items.required,["section","oldText","newText"]);assert.equal(edits.items.additionalProperties,false);
+  assert.equal(edits.maxItems,32);assert.equal(edits.items.properties.oldText.minLength,1);
+  assert.match(edits.items.properties.oldText.description,/Índice: pendiente\./);
+  assert.match(save.parameters.properties.changes.description,/omit trailing line breaks to keep the existing separator/);
+  assert.match(save.promptGuidelines.join("\n"),/Prefer edits for localized changes/);
   assert.equal(h.flags.size,0,"Memory registers no startup flags");assert.equal(h.tools.has("ss_memory_stage"),false);
 });
 

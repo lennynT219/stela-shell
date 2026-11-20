@@ -161,6 +161,12 @@ export function decode(bytes: Uint8Array, request: Request, inputLimit: number, 
     identity(r.memory_id, request.operation === "create" || request.operation === "replace_missing" ? undefined : a.memory_id);
     identity(r.request_id, request.operation === "recover" ? undefined : request.request_id);
     if (!uint(r.revision) || !(r.status === "saved" || ((request.operation === "update" || request.operation === "update_sections") && r.status === "unchanged"))) invalid();
+    if (request.operation === "update_sections" && a.edits !== undefined) {
+      // The entire batch is one update or a no-op. A contradictory revision is
+      // not a publication receipt, even if the request and Memory IDs match.
+      if (!record(a.expected) || !uint(a.expected.revision) ||
+          BigInt(r.revision) !== BigInt(a.expected.revision) + (r.status === "saved" ? 1n : 0n)) invalid();
+    }
     if (request.operation === "create" && r.revision !== 1) invalid();
     if (request.operation === "replace_missing") {
       identity(r.replaced_memory_id, a.expected_memory_id);

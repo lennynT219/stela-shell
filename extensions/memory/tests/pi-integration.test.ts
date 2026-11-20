@@ -44,8 +44,8 @@ function client(f:Fixture,mode="normal",options:{configured?:boolean;child?:bool
     const answer=await final;await waitFor(e=>e.type==="agent_settled",start);return{start,answer,text:answer.message.content.filter((p:any)=>p.type==="text").map((p:any)=>p.text).join("\n")};},
     async close(){if(child.exitCode===null&&child.signalCode===null){child.stdin.end();const timer=setTimeout(()=>child.kill("SIGKILL"),5000);await exited;clearTimeout(timer);}assert.equal(child.exitCode,0,stderr);assert.doesNotMatch(stderr,/Failed to load extension|Extension error|Unhandled/);}};
 }
-async function seed(f:Fixture){const c=new MemoryClient({executable:brain!,vault:f.vault,cwd:f.work,environment:{HOME:f.root,USERPROFILE:f.root,TMPDIR:f.root}});try{
-  const r=(await c.call("create",{context:{working_directory:f.work,authorized_boundary:f.work},title:"Synthetic Pi Memory",sections:["Fixture scope","Accepted constraints","Initial status","Observed evidence","Concrete next step"]})).result;
+async function seed(f:Fixture, evidence="Observed evidence",summary?:string){const c=new MemoryClient({executable:brain!,vault:f.vault,cwd:f.work,environment:{HOME:f.root,USERPROFILE:f.root,TMPDIR:f.root}});try{
+  const r=(await c.call("create",{context:{working_directory:f.work,authorized_boundary:f.work},title:"Synthetic Pi Memory",sections:["Fixture scope","Accepted constraints","Initial status",evidence,"Concrete next step"],...(summary?{summary}:{})})).result;
   assert.equal(r.status,"saved");const id=r.memory_id as string;return{id,current:join(f.vault,"05-memorias",id,"Memoria.md"),history:join(f.vault,"05-memorias",id,"Historial.md")};
 }finally{await c.close();}}
 const finalText=(e:any)=>e.type==="message_end"&&e.message?.role==="assistant"&&e.message.stopReason==="stop";
@@ -56,7 +56,7 @@ test("native Pi + Brain: lookup precedes work; greeting/no-op and pre-final crea
     assert.equal((await p.run("greeting")).text,"MEMORY_GREETING");assert.equal(existsSync(join(f.work,".brain.toml")),false);
     assert.equal((await p.run("save")).text,"MEMORY_RESULT:saved:confirmed");
     const ids=readdirSync(join(f.vault,"05-memorias")).filter(n=>/^[\da-f-]{36}$/.test(n));assert.equal(ids.length,1);const raw=()=>readFileSync(join(f.vault,"05-memorias",ids[0],"Memoria.md"),"utf8");
-    assert.match(raw(),/memory_revision: 1/);assert.equal((await p.run("update")).text,"MEMORY_RESULT:saved:confirmed");assert.match(raw(),/memory_revision: 2/);assert.match(raw(),/Updated fixture scope/);
+    assert.match(raw(),/memory_revision: 1/);assert.equal((await p.run("update")).text,"MEMORY_RESULT:saved:confirmed");assert.match(raw(),/memory_revision: 2/);assert.ok(raw().includes("## Objective and scope\nUpdated fixture scope\n\n## Current decisions"),"whole-section input without a final newline preserves the existing blank line");
     const history=()=>readFileSync(join(f.vault,"05-memorias",ids[0],"Historial.md"),"utf8");
     const log=history();assert.match(log,/Verified useful successor/);assert.doesNotMatch(log,/## Revision|Updated fixture scope/);
     const before=raw();assert.equal((await p.run("noop")).text,"MEMORY_RESULT:unchanged:confirmed");assert.equal(raw(),before);assert.equal(history(),log);
@@ -70,6 +70,50 @@ test("native Pi + Brain: lookup precedes work; greeting/no-op and pre-final crea
     const readEntries=(await p.request("get_entries")).entries,readResult=readEntries.find((e:any)=>e.message?.role==="toolResult"&&e.message.toolName==="ss_memory_read");
     assert.ok(readResult);assert.equal(JSON.stringify(readResult).includes("accepted_markdown"),false,"recalled Markdown is ephemeral, not duplicated in the explicit read receipt");
   }finally{await p.close();rmSync(f.root,{recursive:true,force:true});}
+});
+
+test("native Pi + Brain: short model arguments edit a long section, preserve other bytes and add one log entry",{skip:!cli||!brain,timeout:40_000},async t=>{
+  const f=setup();let p:ReturnType<typeof client>|undefined;
+  try {
+    const prefix="Dato previo.\n".repeat(512),s=await seed(f,prefix+"Initial status","Creación de prueba.");
+    const before=readFileSync(s.current,"utf8"),priorLog=readFileSync(s.history,"utf8");
+    const reason="Se verificó la evidencia.",section="Relevant evidence";
+    const suffix="\n\n[[05-memorias/"+s.id+"/Historial|Historial]]\n\n";
+    const original=prefix+"Initial status"+suffix,revised=prefix+"Verificado."+suffix;
+    assert.ok(before.includes("## "+section+"\n"+original+"## Next actions and open questions"));
+    p=client(f);assert.equal((await p.run("edit")).text,"MEMORY_RESULT:saved:confirmed");
+    const args=p.events.filter(e=>e.type==="message_end"&&e.message?.role==="assistant")
+      .flatMap(e=>e.message.content).filter(b=>b.type==="toolCall"&&b.name==="ss_memory_save").map(b=>b.arguments);
+    assert.deepEqual(args,[{reason,edits:[{section,oldText:"Initial status",newText:"Verificado."}]}]);
+    const compact=Buffer.byteLength(JSON.stringify(args[0])),whole=Buffer.byteLength(JSON.stringify({reason,changes:{[section]:revised}}));
+    t.diagnostic(`Model arguments (UTF-8 JSON): edits ${compact} bytes; equivalent changes ${whole} bytes.`);
+    assert.equal(readFileSync(s.current,"utf8"),before.replace("memory_revision: 1","memory_revision: 2").replace(original,revised));
+    const log=readFileSync(s.history,"utf8");assert.ok(log.startsWith(priorLog));assert.equal(log.slice(priorLog.length).split(reason).length,2);
+    // The only remaining "Initial status" is in Outcome status. Never match it across the named boundary.
+    assert.equal((await p.run("edit")).text,"MEMORY_RESULT:invalid:none");
+    assert.equal(readFileSync(s.history,"utf8"),log);
+    assert.ok(readFileSync(s.current,"utf8").includes("## Outcome status\nInitial status\n"));
+  } finally {await p?.close();rmSync(f.root,{recursive:true,force:true});}
+});
+
+test("native Pi + Brain: disambiguate a repeated word by its label, without rewriting the other entry", {skip:!cli||!brain,timeout:40_000},async()=>{
+  const f=setup();let p:ReturnType<typeof client>|undefined;
+  try {
+    const s=await seed(f,"Portada: pendiente.\nÍndice: pendiente.","Creación de prueba.");
+    const before=readFileSync(s.current,"utf8"),priorLog=readFileSync(s.history,"utf8");
+    p=client(f);
+    const ambiguous=await p.run("ambiguous");
+    assert.equal(ambiguous.text,"MEMORY_RESULT:invalid:none");
+    const receipts=p.events.slice(ambiguous.start).filter(e=>e.type==="tool_execution_end"&&e.toolName==="ss_memory_save");
+    assert.equal(receipts.length,1);assert.equal(receipts[0].result.details.code,"EDIT_AMBIGUOUS");
+    assert.equal(readFileSync(s.current,"utf8"),before);assert.equal(readFileSync(s.history,"utf8"),priorLog);
+
+    // A separate RPC prompt supplies the unique anchor. Never retry inside a failed save.
+    assert.equal((await p.run("index_ready")).text,"MEMORY_RESULT:saved:confirmed");
+    assert.equal(readFileSync(s.current,"utf8"),before.replace("memory_revision: 1","memory_revision: 2").replace("Índice: pendiente.","Índice: listo."));
+    const afterLog=readFileSync(s.history,"utf8");assert.ok(afterLog.startsWith(priorLog));
+    assert.equal(afterLog.slice(priorLog.length).split("El índice ya está listo.").length,2);
+  } finally {await p?.close();rmSync(f.root,{recursive:true,force:true});}
 });
 
 for(const mode of ["denied","readonly","disabled","helper","abort"])test(`native Pi Memory: ${mode} creates no Memory`,{skip:!cli||!brain,timeout:40_000},async()=>{
