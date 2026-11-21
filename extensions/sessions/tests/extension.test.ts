@@ -359,7 +359,7 @@ test("uncommitted interrupted proposal is cancelled without automatic re-proposa
   await h.emit("session_shutdown");
 });
 
-test("package retains session coverage and owned extensions with the configured Memory entry point and unchanged dependencies", () => {
+test("package retains existing extension coverage and declares the Images entry point and exact dependencies", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
   assert.deepEqual(manifest.pi.extensions, [
     "./extensions/method/index.ts",
@@ -368,9 +368,11 @@ test("package retains session coverage and owned extensions with the configured 
     "./extensions/web/index.ts",
     "./extensions/memory/index.ts",
     "./extensions/knowledge/index.ts",
+    "./extensions/images/index.ts",
   ]);
   assert.match(manifest.scripts.test, /extensions\/sessions\/tests\/\*\.test\.ts/);
   assert.match(manifest.scripts.test, /extensions\/web\/tests\/\*\.test\.ts/);
   assert.match(manifest.scripts.test, /extensions\/memory\/tests\/\*\.test\.ts/);
-  assert.deepEqual(manifest.dependencies, { "@mozilla/readability": "0.6.0", linkedom: "0.16.11", turndown: "7.2.5" });
+  assert.match(manifest.scripts.test, /extensions\/images\/tests\/\*\.test\.ts/);
+  assert.deepEqual(manifest.dependencies, { "@mozilla/readability": "0.6.0", "@openai/codex-sdk": "0.171.0", linkedom: "0.16.11", turndown: "7.2.5" });
 });
