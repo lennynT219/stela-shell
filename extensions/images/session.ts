@@ -1,5 +1,5 @@
 import {fail, pngName, UUID} from "./files.ts";
-export const GENERATE = "ss_images_generate", EDIT = "ss_images_edit", SAVE = "ss_images_save";
+export const GENERATE = "ss_images_generate", REFERENCE = "ss_images_generate_with_references", EDIT = "ss_images_edit", SAVE = "ss_images_save";
 export interface Owner {
   session: string;
   project: string;
@@ -67,16 +67,47 @@ export function saveChoice(input: string): Choice|undefined {
 export function imageRequest(s: string) {
   const v = fold(s).replace(/^[¿¡]/, "").replace(/^(?:por favor[, ]+|please )/, "");
   if (/^(?:dibuja(?:me)?|pinta(?:me)?|ilustra|draw|paint|illustrate)\s+\S/u.test(v)) return true;
-  // This recognizes conversations for the optional editor offer, never permission to generate.
+  // Also recognizes non-imperative requests that only start planning.
   return /^(?:genera(?:me)?|crea(?:me)?|haz(?:me)?|disena(?:me)?|quiero|quisiera|necesito|me gustaria|puedes (?:crear|generar|dibujar)|generate|create|make)\s+(?:(?:por favor|para mi|please)\s+)?(?:(?:un[ao]?|el|la|otra?|mi|an?|the|another|new)\s+)*(?:imagen|postal|portada|ilustracion|retrato|foto(?:grafia)?|cartel|logo(?:tipo)?|miniatura|dibujo|pintura|poster|image|picture|postcard|cover|thumbnail|painting|illustration|portrait|banner|infografia|infographic|boceto|sketch|viñeta|vineta|comic|collage|diagrama|diagram|mural|flyer|render)\b/u
       .test(v);
+}
+const action = (s: string) => fold(s).replace(/^¡/u, "").replace(/^(?:por favor[, ]+|please )/u, "");
+const create = /^(?:genera(?:me)?|crea(?:me)?|dibuja(?:me)?|pinta(?:me)?|ilustra|generate|create|draw|paint|illustrate)\s+\S/u;
+const edit = /^(?:haz\s+(?:el|la|los|las)|edita|retoca|corrige|pon(?:le|les)?|agrega(?:le|les)?|anade(?:le|les)?|cambia(?:le|les)?|quita(?:le|les)?|elimina|mejora|ajusta|haz(?:la|lo|las|los)|edit|retouch|fix|add|change|remove|adjust|make (?:it|them))\s+\S/u;
+const basedOn = /^(?:en base a|con base en|a partir de|basandote en|con|usa(?:ndo)?|based on|using)\s+(?:esta|estas|la|las|mis|the|this|these)\s+(?:foto|imagen|referencia|photo|image|reference)s?\b[\s\S]*?\b(?:genera(?:me|r)?|crea(?:me|r)?|dibuja(?:me|r)?|generate|create|draw)\s+\S/u;
+export const mentionsSource = (s: string) => /\b(?:esta(?:s)? (?:foto|imagen|referencia)s?|(?:foto|imagen) adjunta|this (?:photo|image)|these (?:photos|images)|attached (?:photo|image))\b/u.test(fold(s));
+export function imageAction(raw: string, withSource = false, planning = false): "generate"|"edit"|undefined {
+  const s = action(raw);
+  if (s.endsWith("?") || /^(?:no |don't |do not )/u.test(s)) return;
+  if ((withSource && basedOn.test(s)) || ((withSource || imageRequest(s)) && create.test(s)) ||
+      /^(?:dibuja(?:me)?|pinta(?:me)?|ilustra|draw|paint|illustrate)\s+\S/u.test(s) ||
+      (imageRequest(s) && /^(?:haz(?:me)?|disena(?:me)?|make)\s/u.test(s)) ||
+      (planning && /^(?:genera(?:la|lo)?|generate(?: it)?)(?:[.!]|\s+(?:ya|ahora|con lo acordado|now))?[.!]?$/u.test(s))) return "generate";
+  if (edit.test(s)) return "edit";
+}
+export function revisionReply(raw: string): Choice|undefined {
+  const s = action(raw).replace(/[.!]$/u, "");
+  // A pending choice supplies the noun: the number is the selector, not a new edit instruction.
+  const match = /^(?:(?:usa|utiliza|use)\s+)?(?:la |the )?(?:(?:vista(?: previa)?|preview)\s+)?#?([1-9][0-9]{0,4})$/u.exec(s);
+  if (match) return {index: Number(match[1])};
+  if (/^(?:usa |use )?(?:la ultima|the latest|the last)(?: (?:vista|imagen|preview|image))?$/u.test(s)) return {index: "last"};
+}
+/** Resolve a target only. Whether this is an edit is decided by the chat agent. */
+export function revisionChoice(raw: string): Choice {
+  const s = fold(raw);
+  const numbers = [...s.matchAll(/\b(?:vista(?: previa)?|preview)\s+#?([1-9][0-9]{0,4})\b/gu)];
+  if (new Set(numbers.map(m => m[1])).size > 1) return fail("ambiguous");
+  if (numbers.length) return {index: Number(numbers[0][1])};
+  return {index: "last"};
 }
 /** Never fill in arbitrary omitted text: a shorter argument may omit only a leading request verb/article.
  * In that case restoring the harmless prefix also preserves medium cues such as “Pinta”. */
 export function completeDescription(raw: string, prompt: unknown): string|undefined {
-  if (typeof prompt !== "string" || !prompt || prompt !== prompt.trim()) return;
+  if (typeof prompt !== "string" || !prompt) return;
   const full = raw.trim();
-  if (prompt === full) return full;
+  // Older clients echo the body. Compare layout-insensitively, but send the actual submission.
+  const words = (text: string) => text.replace(/[ \t\r\n]+/gu, " ").trim();
+  if (words(prompt) === words(full)) return full;
   if (!full.endsWith(prompt)) return;
   const prefix = full.slice(0, -prompt.length);
   if (/\s$/u.test(prefix) &&
@@ -93,7 +124,7 @@ export function records(branch: BranchEntry[], owner: Owner) {
         d.directoryId !== owner.directoryId || !UUID.test(d.thread) || typeof d.sha256 !== "string" ||
         !/^[a-f0-9]{64}$/.test(d.sha256))
       continue;
-    if ((m.toolName === GENERATE || m.toolName === EDIT) && d.status === "preview" && !seen.has(d.thread) &&
+    if ((m.toolName === GENERATE || m.toolName === REFERENCE || m.toolName === EDIT) && d.status === "preview" && !seen.has(d.thread) &&
         typeof d.home === "string" && typeof d.file === "string" && typeof d.name === "string" &&
         Number.isSafeInteger(d.width) && Number.isSafeInteger(d.height)) {
       seen.add(d.thread);

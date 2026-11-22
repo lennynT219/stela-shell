@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {spawn} from "node:child_process";
+import {spawn, spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -11,53 +11,22 @@ import {png} from "./fixture.ts";
 const cli = process.env.SS_TEST_PI_CLI;
 const extensionFiles = {renderer: "./fixtures/extension.ts", production: "../index.ts", stream: "./fixtures/stream-extension.ts"};
 type Prompt = string | {message: string; images?: {type: "image"; mimeType: string; data: string}[]; expectHandled?: true};
-async function run(root: string, prompts: Prompt[], session?: string, extension: keyof typeof extensionFiles = "renderer",
-                   observe?: (turn: number, event: any, abort: () => void, confirm: (id: string, allow: boolean) => void) => void) {
-  const cwd = join(root, "project"), profile = join(root, "pi"), sessions = join(root, "sessions"),
-        home = join(root, "codex");
+const ext = (s: string) => fileURLToPath(new URL(s, import.meta.url));
+function piFixture(root: string, session: string|undefined, extension: keyof typeof extensionFiles) {
+  const cwd = join(root, "project"), profile = join(root, "pi"), sessions = join(root, "sessions"), home = join(root, "codex");
   for (const d of [cwd, profile, sessions, home]) mkdirSync(d, {recursive: true});
-  const ext = (s: string) => fileURLToPath(new URL(s, import.meta.url));
-  const ch = spawn(
-      process.execPath,
-      [
-        cli!,
-        "--offline",
-        "--mode",
-        "rpc",
-        "--session-dir",
-        sessions,
-        ...(session ? ["--session", session] : []),
-        "--no-extensions",
-        "--no-mcp",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-context-files",
-        "--no-approve",
-        "--extension",
-        ext("./fixtures/provider.ts"),
-        "--extension",
-        ext(extensionFiles[extension]),
-        "--tools",
-        "ss_images_generate,ss_images_edit,ss_images_save",
-        "--model",
-        "ss-images-fixture/fixture",
-        "--thinking",
-        "off"
-      ],
-      {
-        cwd,
-        env: {
-          PATH: process.env.PATH,
-          SYSTEMROOT: process.env.SYSTEMROOT,
-          HOME: root,
-          USERPROFILE: root,
-          TMPDIR: root,
-          CODEX_HOME: home,
-          PI_CODING_AGENT_DIR: profile,
-          NO_UPDATE_NOTIFIER: "1"
-        },
-        stdio: ["pipe", "pipe", "pipe"]
-      });
+  const args = [cli!, "--offline", "--session-dir", sessions, ...(session ? ["--session", session] : []),
+    "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-approve",
+    "--extension", ext("./fixtures/provider.ts"), "--extension", ext(extensionFiles[extension]), "--tools",
+    "ss_images_generate,ss_images_edit,ss_images_generate_with_references,ss_images_save", "--model", "ss-images-fixture/fixture", "--thinking", "off"];
+  const env = {PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, HOME: root, USERPROFILE: root,
+    TMPDIR: root, CODEX_HOME: home, PI_CODING_AGENT_DIR: profile, NO_UPDATE_NOTIFIER: "1"};
+  return {args, cwd, env};
+}
+async function run(root: string, prompts: Prompt[], session?: string, extension: keyof typeof extensionFiles = "renderer",
+                   observe?: (turn: number, event: any, abort: () => void) => void) {
+  const {args, cwd, env} = piFixture(root,session,extension);
+  const ch = spawn(process.execPath, [...args,"--mode","rpc"], {cwd, env, stdio:"pipe"});
   const done = new Promise<number|null>((resolve, reject) => {
     ch.once("error", reject);
     ch.once("close", resolve)
@@ -73,7 +42,6 @@ async function run(root: string, prompts: Prompt[], session?: string, extension:
     ch.stdin.write(JSON.stringify({type: "prompt", id: "p" + index, ...input}) + "\n");
   };
   const advance = () => { if (++index === prompts.length) ch.stdin.end(); else send() };
-  const confirm = (id: string, allow: boolean) => { ch.stdin.write(JSON.stringify({type: "extension_ui_response", id, confirmed: allow}) + "\n") };
   const abort = () => { ch.stdin.write('{"type":"abort","id":"abort-fixture"}\n') };
   const rl = createInterface({input: ch.stdout});
   send();
@@ -81,7 +49,7 @@ async function run(root: string, prompts: Prompt[], session?: string, extension:
     for await (const line of rl) {
       if (!line.trim()) continue;
       const e = JSON.parse(line);
-      observe?.(index, e, abort, confirm);
+      observe?.(index, e, abort);
       if (e.type === "response" && e.command === "prompt") {
         assert.ok(e.success, JSON.stringify(e));
         const p = prompts[index], handled = typeof p !== "string" && p.expectHandled;
@@ -151,51 +119,55 @@ test("Pi survives a Codex SDK turn failure, can abort a live SDK child and accep
         assert.ok(!existsSync(join(project, "media")));
       } finally { rmSync(root, {recursive: true, force: true}) }
     });
-test("Pi RPC: private attachments, real per-edit UI consent, edited preview and approved save after reopen",
+test("Pi RPC: contextual captions reach chat, not external pixels; only the requested change dispatches", {skip:!cli}, async () => {
+  const root = mkdtempSync(join(tmpdir(),"ss-guided-"));
+  try {
+    const caption = "Traslada el acabado de la muestra al dibujo anterior.", source = png(123,true);
+    const images = [{type:"image" as const,mimeType:"image/png" as const,data:source.toString("base64")}];
+    const calls: number[] = [];
+    const results = await run(root,["Genera una foto de un faro", {message:"¿Qué opciones habría?",images}, {message:caption,images}], undefined,"renderer",(turn,e) => {
+      if (e.type === "tool_execution_start") calls.push(turn);
+      if (turn && e.type === "message_end" && e.message.role === "user") {
+        assert.equal(e.message.content.length,1); assert.equal(e.message.content[0].type,"text");
+      }
+      assert.ok(e.type !== "extension_ui_request" || e.method !== "confirm");
+    });
+    assert.deepEqual(calls,[0,2]); assert.deepEqual(results.map(r=>r.details.status),["preview","preview"]);
+    const sessions = join(root,"sessions"), log = readFileSync(join(sessions,readdirSync(sessions).find(f=>f.endsWith(".jsonl"))!),"utf8");
+    assert.ok(log.includes(caption));
+    for (const bytes of [source,png(123)]) assert.ok(!log.includes(bytes.toString("base64")));
+    assert.ok(!existsSync(join(root,"project","media")));
+  } finally { rmSync(root,{recursive:true,force:true}) }
+});
+
+test("Pi RPC: natural edit requests with private attachments, no second confirmation, edited preview and approved save after reopen",
     {skip: !cli, timeout: 60_000}, async () => {
       const root = mkdtempSync(join(tmpdir(), "ss-photo-rpc-")), project = join(root, "project"),
         home = join(root, "codex"), file = join(root, "pi-clipboard-12345678-0000-4000-8000-000000000001.png");
       try {
-        const instructions = ["Mejora la luz del faro seleccionado.", "Cambia únicamente el color del tejado.", "Conserva el dibujo del pelaje."],
+        const instructions = ["Mejora la luz del faro seleccionado.", "Cambia únicamente el color del tejado.", "Mejora el dibujo del pelaje."],
           sources = [png(21, true), png(47, true), png(21, true)], previews = [png(21), png(47), png(21)];
         writeFileSync(file, sources[0]);
-        const dialogs: number[] = [], reviews: number[] = [], edited: number[] = [], userPrompts: string[] = [];
+        const edited: number[] = [], userPrompts: string[] = [];
         const prompts = instructions.map((s, i): Prompt => ({
-          message: `Editar foto:\n${s}`, images: [{type: "image", mimeType: "image/png", data: sources[i].toString("base64")}]
+          message: i === 0 ? s : `Editar foto:\n${s}`, images: [{type: "image", mimeType: "image/png", data: sources[i].toString("base64")}]
         }));
-        const [denied, firstEdit, secondEdit] = await run(root, prompts, undefined, "renderer", (turn, e, _abort, confirm) => {
+        const results = await run(root, prompts, undefined, "renderer", (turn, e) => {
           if (e.type === "message_end" && e.message.role === "user") {
             const c = e.message.content;
             assert.equal(c.length, 1);
             assert.equal(c[0].type, "text");
             userPrompts.push(c[0].text);
           }
-          if (e.type === "tool_execution_update" && e.partialResult?.details?.status === "review") {
-            reviews.push(turn);
-            assert.deepEqual(Buffer.from(e.partialResult.content[1].data, "base64"), previews[turn]);
-            assert.equal(e.partialResult.details.sha256, hash(previews[turn]));
-          }
-          if (e.type === "extension_ui_request" && e.method === "confirm") {
-            dialogs.push(turn);
-            assert.deepEqual(reviews, dialogs, "the preview precedes its matching confirmation");
-            assert.match(e.title, /OpenAI/);
-            assert.ok(e.message.includes(hash(previews[turn])));
-            assert.ok(e.message.includes(instructions[turn]) && e.message.includes("PNG adjunto"));
-            const outputs = join(home, "generated_images");
-            assert.equal(existsSync(outputs) ? readdirSync(outputs).length : 0, Math.max(0, turn - 1));
-            confirm(e.id, turn !== 0);
-          }
+          assert.ok(e.type !== "extension_ui_request" || e.method !== "confirm");
           if (e.type === "tool_execution_update" && e.partialResult?.details?.status === "editing") edited.push(turn);
         });
-        assert.deepEqual(dialogs, [0, 1, 2]);
-        assert.deepEqual(edited, [1, 2]);
-        assert.equal(denied?.details.code, "edit_declined");
-        assert.deepEqual([firstEdit, secondEdit].map(x => x?.details.status), ["preview", "preview"]);
+        assert.deepEqual(edited, [0, 1, 2]);
+        assert.deepEqual(results.map(x => x?.details.status), ["preview", "preview", "preview"]);
         assert.equal(new Set(userPrompts).size, 3, "each dispatch is bound to a distinct live marker");
         assert.ok(userPrompts.every(p => p.startsWith("Solicitud local de edición de foto (")));
         const expected = (i: number) => png((Buffer.byteLength(instructions[i]) + previews[i].toString("base64").length) % 230, true);
-        assert.equal(firstEdit.details.sha256, hash(expected(1)));
-        assert.equal(secondEdit.details.sha256, hash(expected(2)));
+        results.forEach((r, i) => assert.equal(r.details.sha256, hash(expected(i))));
         assert.deepEqual(readFileSync(file), sources[0]);
         assert.ok(!existsSync(join(project, "media")));
         const session = join(root, "sessions", readdirSync(join(root, "sessions")).find(n => n.endsWith(".jsonl"))!);
@@ -207,7 +179,7 @@ test("Pi RPC: private attachments, real per-edit UI consent, edited preview and 
         writeFileSync(join(media, "foto.png"), sources[0]);
         let pathRejections = 0;
         const [saved] = await run(root, [{message: `Editar foto:\n${file}\nCambia solo la luz.`, expectHandled: true},
-          "guarda la segunda como foto.png"], session, "renderer", (turn, event) => {
+          "guarda la vista 3 como foto.png"], session, "renderer", (turn, event) => {
           if (turn !== 0) return;
           assert.ok(!["agent_start", "tool_execution_start", "tool_execution_update"].includes(event.type));
           if (event.type === "extension_ui_request") {
@@ -223,24 +195,89 @@ test("Pi RPC: private attachments, real per-edit UI consent, edited preview and 
       } finally { rmSync(root, {recursive: true, force: true}) }
     });
 
-test("real Pi RPC with a scripted chat: ask, draft, user edits and submits; only that last turn produces a preview",
+test("real Linux Pi terminal: submit current clipboard PNGs without another confirmation and save only the numbered output",
+    {skip: !cli || process.platform !== "linux" || spawnSync("python3", ["--version"]).status !== 0, timeout: 48_000}, () => {
+      const root = mkdtempSync(join(tmpdir(),"ss-ref-tui-"));
+      try {
+        const {args, cwd, env} = piFixture(root,undefined,"renderer"), inputs = [png(32,true),png(52,true)];
+        const files = [1,2].map(n => join(root,`pi-clipboard-12345678-0000-4000-8000-00000000000${n}.png`));
+        files.forEach((name,i) => writeFileSync(name,inputs[i]));
+        const r = spawnSync("python3",[ext("./fixtures/reference-tui.py"),process.execPath,...args],
+          {cwd, env:{...env, TERM:"xterm-256color",LANG:"C.UTF-8"},encoding:"utf8",timeout:42_000});
+        assert.equal(r.status,0,r.stderr+String(r.error??""));
+        const generatedDir = join(root,"codex","generated_images"), threads = readdirSync(generatedDir);
+        assert.equal(threads.length,1);
+        const dir = join(generatedDir,threads[0]);
+        assert.deepEqual(readFileSync(join(cwd,"media","images","sello.png")),readFileSync(join(dir,readdirSync(dir)[0])));
+        files.forEach((name,i) => assert.deepEqual(readFileSync(name),inputs[i]));
+      } finally { rmSync(root,{recursive:true,force:true}) }
+    });
+
+test("real Pi RPC: natural and legacy reference requests dispatch without confirmation; only outputs reach chat and can be saved after reopen",
+    {skip: !cli, timeout: 60_000}, async () => {
+      const root = mkdtempSync(join(tmpdir(),"ss-refs-rpc-"));
+      try {
+        const prompt = "REF-FIXTURE-PRIVADO: crea un icono.\nUsa el contorno de la primera y la paleta de la tercera.",
+          file = join(root,"foto del cliente.png"), sources = [31,62,95].map(i => png(i,true)), refs = [31,62,95].map(i => png(i));
+        writeFileSync(file,sources[0]); // Only the RPC client is allowed to attach this; a path alone must be consumed.
+        const attachments = sources.map(b => ({type:"image" as const, mimeType:"image/png" as const, data:b.toString("base64")}));
+        const requests = ["En base a estas fotos genera un icono. " + prompt, prompt + " Sin letras."];
+        const markers: string[] = [], generated: number[] = [];
+        let context: any;
+        const results = await run(root, [
+          {message:`Generar con referencias:\n${file}\n${prompt}`,expectHandled:true},
+          {message:requests[0],images:attachments}, {message:"Genera la imagen con este prompt:\n"+requests[1],images:attachments},
+          "Inspecciona el contexto sintético."
+        ],undefined,"renderer",(turn,e) => {
+          if (!turn) assert.ok(!["agent_start","tool_execution_start","tool_execution_update"].includes(e.type));
+          if (e.type === "message_end" && e.message.role === "user" && [1,2].includes(turn)) {
+            assert.equal(e.message.content.length,1);
+            const m = e.message.content[0].text; assert.match(m,/^Solicitud local de generación con referencias \(/u); markers.push(m);
+          }
+          assert.ok(e.type !== "extension_ui_request" || e.method !== "confirm");
+          if (e.type === "tool_execution_update" && e.partialResult?.details?.status === "generating") generated.push(turn);
+          if (turn===3 && e.type==="message_end" && e.message.role==="assistant" && e.message.stopReason==="stop")
+            context=JSON.parse(e.message.content[0].text);
+        });
+        assert.equal(new Set(markers).size,2);
+        assert.deepEqual(generated,[1,2]);
+        const seeds = requests.map(text => {
+          const digest=createHash("sha256").update(text); refs.forEach(b => digest.update(b));
+          return digest.digest()[0]%230;
+        });
+        assert.deepEqual(results.map(r => [r?.details.status,r?.details.sha256]), seeds.map(seed => ["preview",hash(png(seed,true))]));
+        assert.deepEqual(context,{images:seeds.map(seed => hash(png(seed))),privatePrompt:false});
+        const session=join(root,"sessions",readdirSync(join(root,"sessions")).find(f => f.endsWith(".jsonl"))!);
+        const log=readFileSync(session,"utf8");
+        for(const sensitive of [prompt.split(":")[0],file,...[...sources,...refs].map(b=>b.toString("base64"))]) assert.ok(!log.includes(sensitive));
+        assert.ok(!existsSync(join(root,"project","media"))); assert.deepEqual(readFileSync(file),sources[0]);
+        const [saved]=await run(root,["guarda la vista 2 como icono.png"],session);
+        assert.equal(saved?.details.relative,join("media","images","icono.png"));
+        assert.deepEqual(readFileSync(join(root,"project",saved.details.relative)),png(seeds[1],true));
+      } finally { rmSync(root,{recursive:true,force:true}) }
+    });
+
+test("real Pi RPC with a scripted chat: plan, generate without a prompt copy and correct the latest preview",
     {skip: !cli, timeout: 35_000}, async () => {
       const root = mkdtempSync(join(tmpdir(), "ss-images-design-"));
       try {
         const text: string[] = [], calls: number[] = [];
         const edited = "Portada vertical: faro a la luz de la luna, mar en calma. Tinta azul. Sin letras.";
         const results = await run(root, ["Quiero una portada para mi cuento.", "Un faro, con calma nocturna. Sin letras.",
-                   "Genera la imagen con este prompt:\n" + edited], undefined, "renderer", (turn, e) => {
+                   "Genera la portada", "Haz la luna más grande."], undefined, "renderer", (turn, e) => {
           if (e.type === "message_end" && e.message.role === "assistant" && e.message.stopReason === "stop")
             text[turn] = e.message.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
           if (e.type === "tool_execution_start") calls.push(turn);
           assert.ok(!(e.type === "extension_ui_request" && e.method === "set_editor_text"));
         });
         assert.match(text[0], /¿Qué debería verse/);
-        assert.match(text[1], /Genera la imagen con este prompt:\nPortada vertical:[^\n]+Sin letras\./);
-        assert.deepEqual(calls, [2]);
-        assert.equal(results[0]?.details.status, "preview");
-        assert.equal(results[0].details.sha256, hash(png(Buffer.byteLength(edited) % 230, true)));
+        assert.match(text[1], /^Portada vertical:[^\n]+Sin letras\./);
+        assert.deepEqual(calls, [2, 3]);
+        assert.deepEqual(results.map(r => r?.details.status), ["preview", "preview"]);
+        const previewSeed = Buffer.byteLength(edited) % 230;
+        assert.equal(results[0].details.sha256, hash(png(previewSeed, true)));
+        const correctedSeed = (Buffer.byteLength("Haz la luna más grande.") + png(previewSeed).toString("base64").length) % 230;
+        assert.equal(results[1].details.sha256, hash(png(correctedSeed, true)));
         assert.ok(!existsSync(join(root, "project", "media")));
       } finally { rmSync(root, {recursive: true, force: true}) }
     });
@@ -295,9 +332,8 @@ test(
     {skip: !cli, timeout: 35_000}, async () => {
       const r = mkdtempSync(join(tmpdir(), "ss-images-login-"));
       try {
-        const [idea, a] = await run(r, ["Genera una postal", "Genera la imagen con este prompt: Postal de una montaña al amanecer."], undefined, "production");
-        assert.equal(idea?.details.code, "draft_needed");
-        assert.equal(a?.details.code, "login_required", JSON.stringify(a));
+        const results = await run(r, ["Genera una postal de una montaña al amanecer.", "Genera la imagen con este prompt: Postal de una montaña al amanecer."], undefined, "production");
+        assert.deepEqual(results.map(r => r?.details.code), ["login_required", "login_required"]);
         assert.ok(!existsSync(join(r, "project", "media")));
       } finally {
         rmSync(r, {recursive: true, force: true});

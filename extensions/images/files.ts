@@ -178,14 +178,14 @@ export function reportedFile(home: string, thread: string, text: string) {
     const m = /^([A-Za-z0-9][A-Za-z0-9_-]{0,159}\.png)(?=$|[\s`"')>\]])/.exec(text.slice(i));
     if (m) files.add(m[1]);
   }
-  if (files.size !== 1) return fail("no_png");
+  if (files.size !== 1) return fail(files.size ? "no_png_multiple" : "no_png_missing");
   return [...files][0];
 }
-function readPngAt(parent: Dir, file: string) {
+function readPngAt(parent: Dir, file: string, remaining = MAX_BYTES) {
   let fd: number|undefined;
   try {
     const p = join(parent.path, file), s = lstatSync(p);
-    if (!s.isFile() || s.nlink !== 1 || s.size < 57 || s.size > MAX_BYTES) return fail("invalid_png");
+    if (!s.isFile() || s.nlink !== 1 || s.size < 57 || s.size > Math.min(MAX_BYTES, remaining)) return fail("invalid_png");
     fd = openSync(p, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     const o = fstatSync(fd);
     if (!o.isFile() || o.dev !== s.dev || o.ino !== s.ino || o.size !== s.size) return fail("source_changed");
@@ -223,13 +223,13 @@ export function readOriginal(home: string, thread: string, file: string) {
   }
 }
 
-/** Only the local edit action calls this, with the single literal file selected in the live human submission. */
-export function readPhotoFile(path: string) {
+/** Private image actions only: a literal file selected in the current TUI submission, never a model argument. */
+export function readPhotoFile(path: string, remaining = MAX_BYTES) {
   let parent: Dir|undefined;
   try {
     parent = directory(dirname(path));
-    const {width, height, preview} = readPngAt(parent, basename(path));
-    return {width, height, preview};
+    const {width, height, preview, bytes} = readPngAt(parent, basename(path), remaining);
+    return {width, height, preview, sourceBytes: bytes.length};
   } catch (e) {
     if (e instanceof ImageError && e.message === "invalid_png") throw e;
     return fail("photo_unavailable");

@@ -3,11 +3,12 @@ import {existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "node:test";
-import {runEditRequest} from "../codex.ts";
+import {runEditRequest, runReferenceRequest} from "../codex.ts";
 import {MAX_BYTES} from "../files.ts";
-import {reviewPhoto, selectPhoto} from "../photo.ts";
+import {REFERENCE_HEADING, referenceRequest, reviewImages, selectPhoto, selectReferences} from "../photo.ts";
 import {png} from "./fixture.ts";
 
+const reviewPhoto = (selection: ReturnType<typeof selectPhoto>) => reviewImages(selection)[0];
 const image = (bytes: Buffer) => ({type: "image", mimeType: "image/png", data: bytes.toString("base64")});
 test("one explicitly selected PNG: bounded input, no traversal, metadata, hidden instructions or ambiguous sources", () => {
   const root = mkdtempSync(join(tmpdir(), "ss-photo-source-"));
@@ -42,6 +43,68 @@ test("one explicitly selected PNG: bounded input, no traversal, metadata, hidden
     }
     assert.deepEqual(readFileSync(file), original);
   } finally { rmSync(root, {recursive: true, force: true}) }
+});
+
+test("only explicit reference submissions: ordered PNGs before or after a prompt, never mixed or silently dropped", () => {
+  const root = mkdtempSync(join(tmpdir(), "ss-refs-source-"));
+  try {
+    const paths = [1,2,3].map((n) => join(root, `Imagen ${n}.png`));
+    paths.forEach((p,i) => writeFileSync(p, png(31+i,true)));
+    const prompt = "Usa la forma de la primera y los colores de la segunda.\nSin letras.",
+      files = paths.join("\n"), args = paths.map((_,i) => image(png(31+i,true)));
+    for (const header of [REFERENCE_HEADING, "Generate with references:", "Genera la imagen con este prompt:"]) {
+      for (const [s, a] of [[files+"\n"+prompt, []], [prompt+"\n"+files, []], [prompt, args]] as const) {
+        const raw = header + "\n" + s;
+        assert.ok(referenceRequest(raw, !!a.length));
+        const selected = selectReferences(raw, a);
+        assert.equal(selected.instructions, prompt);
+        assert.deepEqual(reviewImages(selected).map(x => x.preview), [png(31),png(32),png(33)]);
+      }
+    }
+    assert.ok(!referenceRequest("Genera la imagen con este prompt: Un logo.",false));
+    assert.ok(!referenceRequest("Dibuja un faro",true)); // ordinary chat attachment is not authorization
+    for (const s of ["Generar con referencias\n"+prompt, "Genera la imagen con este prompt:\n"+join(root,"foto.jpg")+"\n"+prompt,
+      REFERENCE_HEADING+"\n"+paths[0]+"\nsilueta.png\n"+prompt]) {
+      assert.ok(referenceRequest(s,false));
+      assert.throws(() => selectReferences(s), /reference_selection/);
+    }
+    for (const [s,a] of [[prompt, []], [files, []], [files+"\n"+paths[0]+"\n"+prompt, []], [prompt, [...args,args[0]]],
+      [paths[0]+"\n"+prompt,args], [paths[0]+"\n"+prompt+"\n"+paths[1],[]], [paths[0]+"\nusa el anterior",[]],
+      [prompt, [args[0],{...args[1], mimeType:"image/jpeg"}]], [prompt+"\x1b[2J",args], [prompt, [args[0],{...args[1],data:"A".repeat(4 * Math.ceil(MAX_BYTES/3))}]] ] as const)
+      assert.throws(() => selectReferences(REFERENCE_HEADING+"\n"+s,a), /reference_selection/);
+    assert.throws(() => reviewImages(selectReferences(REFERENCE_HEADING+"\n"+prompt,[args[0], image(Buffer.from("not PNG"))])), /invalid_png/);
+  } finally { rmSync(root,{recursive:true,force:true}) }
+});
+
+test("multiple staged reference snapshots are removed even when scope is revoked partway through staging", async () => {
+  const root = mkdtempSync(join(tmpdir(),"ss-refs-clean-")), project = join(root,"project"), temp = join(root,"temp");
+  mkdirSync(project); mkdirSync(temp);
+  const key = process.platform === "win32" ? "TEMP" : "TMPDIR", prev = process.env[key], refs = [png(18),png(19)];
+  process.env[key] = temp;
+  try {
+    for (const cause of ["beforeDispatch","duringPreparation"] as const) {
+      const ctrl = new AbortController();
+      let checks = 0;
+      await assert.rejects(runReferenceRequest({home:root, project, signal:ctrl.signal, prompt:"Una marca nueva.", references:refs,
+        checkCurrent: () => {
+          if (++checks === 2 && cause === "duringPreparation") {
+            const work = readdirSync(temp);
+            assert.equal(work.length,1); assert.deepEqual(readdirSync(join(temp,work[0])), ["reference-1.png"]);
+            ctrl.abort();
+          }
+        }}, async(cwd) => {
+        assert.equal(cause,"beforeDispatch");
+        assert.deepEqual(readdirSync(cwd).sort(), ["reference-1.png","reference-2.png"]);
+        refs.forEach((b,i) => assert.deepEqual(readFileSync(join(cwd,`reference-${i+1}.png`)),b));
+        throw Error("fixture preflight failure");
+      }),cause === "duringPreparation" ? /cancelled/ : /generation_failed/);
+      assert.deepEqual(readdirSync(temp),[]);
+    }
+    assert.deepEqual(readdirSync(project),[]);
+  } finally {
+    if (prev === undefined) delete process.env[key]; else process.env[key] = prev;
+    rmSync(root,{recursive:true,force:true});
+  }
 });
 
 test("the private reference copy is removed on preflight failure, active cancellation and scope loss before SDK iteration", async () => {

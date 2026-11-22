@@ -1,22 +1,25 @@
 import assert from "node:assert/strict";
+import {randomUUID} from "node:crypto";
 import {mkdtempSync, mkdirSync, existsSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {test} from "node:test";
 import {registerImages} from "../index.ts";
-import {EDIT, GENERATE, SAVE} from "../session.ts";
+import {ImageError} from "../files.ts";
+import {EDIT, GENERATE, REFERENCE, SAVE} from "../session.ts";
 import {SUBMIT} from "../planning.ts";
-import type {EditPhoto, Generate} from "../codex.ts";
+import type {EditPhoto, Generate, GenerateWithReferences} from "../codex.ts";
 import {png, renderFixture} from "./fixture.ts";
 const submit = (prompt: string) => `${SUBMIT}\n${prompt}`;
 function harness(generate: Generate = renderFixture, homeInsideProject = false, mode = "tui",
-                 edit: EditPhoto = async () => assert.fail("unexpected edit dispatch")) {
+                 edit: EditPhoto = async () => assert.fail("unexpected edit dispatch"),
+                 generateWithReferences: GenerateWithReferences = async () => assert.fail("unexpected reference dispatch")) {
   const root = mkdtempSync(join(tmpdir(), "ss-img-owner-")), cwd = join(root, "project"),
         home = join(homeInsideProject ? cwd : root, "codex");
   mkdirSync(cwd);
   mkdirSync(home);
   const tools = new Map<string, any>(), events = new Map<string, Function>(), entries: any[] = [];
-  let sid = "session-a", active = [GENERATE, EDIT, SAVE], seq = 0;
+  let sid = "session-a", active = [GENERATE, EDIT, REFERENCE, SAVE], seq = 0;
   const sm = {
     getCwd: () => cwd,
     getSessionId: () => sid,
@@ -25,9 +28,9 @@ function harness(generate: Generate = renderFixture, homeInsideProject = false, 
     getLeafId: () => entries.at(-1)?.id ?? null
   };
   let editor = "";
-  let confirm = async (_title: string, _msg: string) => false;
+  const confirm = async () => assert.fail("unexpected second confirmation");
   const ctx = {cwd, sessionManager: sm, mode, hasUI: mode === "rpc" || mode === "tui", ui: {
-    confirm: (title: string, msg: string) => confirm(title, msg), notify: () => {},
+    confirm, notify: () => {},
     getEditorText: () => editor, setEditorText: (text: string) => { editor = text }
   }};
   const host = {
@@ -35,7 +38,7 @@ function harness(generate: Generate = renderFixture, homeInsideProject = false, 
     on: (e: string, h: Function) => events.set(e, h),
     getActiveTools: () => active
   };
-  registerImages(host as any, {generate, edit, env: {CODEX_HOME: home}});
+  registerImages(host as any, {generate, edit, generateWithReferences, env: {CODEX_HOME: home}});
   const emit = (e: string, v: any = {}) => events.get(e)?.(v, ctx);
   emit("session_start");
   const push = (m: any) => entries.push({type: "message", id: String(++seq), message: m});
@@ -60,7 +63,6 @@ function harness(generate: Generate = renderFixture, homeInsideProject = false, 
     call,
     emit,
     entries,
-    confirm: (fn: typeof confirm) => { confirm = fn },
     type: (text: string) => { editor = text },
     editor: () => editor,
     answer: (text: string, stopReason = "stop") => {
@@ -89,7 +91,7 @@ test(
       try {
         h.input("hola");
         assert.ok((await h.call(GENERATE, {prompt: "hola"})).isError);
-        h.input(prompt);
+        h.input("Quiero un dibujo de un faro.");
         assert.equal((await h.call(GENERATE, {prompt})).details.code, "draft_needed");
         h.input(submit(prompt));
         assert.equal(
@@ -119,6 +121,22 @@ test(
         h.close();
       }
     });
+test("explicit multiline prompts use the submitted body without a model echo, including legacy reflow", async () => {
+  const seen: string[] = [], h = harness(async a => { seen.push(a.prompt); return renderFixture(a) });
+  const body = "Cuadrícula 2 × 2.\r\n\r\n    Tinta #FFD400.\n  Sin letras.";
+  try {
+    for (const args of [{}, {prompt:"   Cuadrícula 2 × 2. Tinta #FFD400. Sin letras."}]) {
+      h.input(submit(body));
+      assert.equal((await h.call(GENERATE, args)).details.status, "preview");
+    }
+    h.input(submit("á".repeat(2049)));
+    assert.equal((await h.call(GENERATE, {})).details.code, "invalid_prompt");
+    h.input("Genera una postal");
+    assert.equal((await h.call(GENERATE, {})).details.code, "invalid_prompt");
+    assert.deepEqual(seen,[body,body]);
+  } finally { h.close() }
+});
+
 test("a model cannot discard a visual constraint, even if its excerpt is literal", async () => {
   const seen: string[] = [];
   const h = harness(async a => { seen.push(a.prompt); return renderFixture(a) });
@@ -136,7 +154,7 @@ test("a model cannot discard a visual constraint, even if its excerpt is literal
   }
 });
 
-test("chat questions, a displayed draft, revisions and praise do not generate; one live edited submission does", async () => {
+test("chat questions, a displayed draft, revisions and praise do not generate; a natural generation request does without copying the draft", async () => {
   const seen: string[] = [], h = harness(async a => { seen.push(a.prompt); return renderFixture(a) });
   const draft = 'Portada vertical: una casa aislada entre pinos; tinta negra y niebla. Sin letras.';
   const revised = draft.replace('tinta negra', 'acuarela azul');
@@ -162,8 +180,7 @@ test("chat questions, a displayed draft, revisions and praise do not generate; o
     }
     assert.deepEqual(seen, []);
     const edited = revised.replace('azul', 'verde');
-    h.input(submit(edited));
-    assert.equal((await h.call(GENERATE, {prompt: revised})).details.code, "invalid_prompt");
+    h.input("Genera la portada");
     assert.equal((await h.call(GENERATE, {prompt: edited})).details.status, "preview");
     assert.ok((await h.call(GENERATE, {prompt: edited})).isError);
     assert.deepEqual(seen, [edited]);
@@ -184,43 +201,40 @@ test("offering a draft never replaces typed input, prefills RPC, or carries acro
   }
 });
 
-test("edit consent covers the displayed pixels and text once, never a path change during the dialog", async () => {
-  let sent = 0, dialogs = 0, reviewed: Buffer|undefined;
-  const instructions = "Conserva el sujeto. Cambia solo el cielo.";
+test("a draft cannot prefill a reference path chosen by the model into the local file-selection workflow", () => {
+  const h = harness();
+  try {
+    h.input("Quiero un logo.");
+    h.answer("```text\n" + submit("Un icono.\n" + join(h.root, "archivo.png")) + "\n```");
+    assert.equal(h.editor(),"");
+  } finally { h.close() }
+});
+
+test("a current TUI photo is pinned at submission and sent once without a second confirmation", async () => {
+  let sent = 0;
+  const instructions = "Ponle alas a esta foto.";
   const h = harness(renderFixture, false, "tui", async a => {
     sent++;
     assert.equal(a.prompt, instructions);
-    assert.deepEqual(a.photo, reviewed);
-    assert.deepEqual(a.photo, png(42)); // The same pixels, without metadata.
+    assert.deepEqual(a.photo, png(42)); // The submitted pixels, without metadata.
     return renderFixture(a);
   });
+  const path = join(tmpdir(), `pi-clipboard-${randomUUID()}.png`);
   try {
-    const path = join(h.root, "Foto familiar.png"), raw = `Editar foto:\n${path}\n${instructions}`;
-    writeFileSync(path, png(42, true));
-    h.confirm(async (_title, msg) => {
-      dialogs++;
-      assert.ok(msg.includes(path) && msg.includes(instructions) && msg.includes("OpenAI"));
-      assert.ok(reviewed && !sent, "review is local, before dispatch");
-      writeFileSync(path, png(199)); // Only the pre-dialog snapshot may be sent.
-      return true;
-    });
-    const marker = h.input(raw);
+    writeFileSync(path, png(42, true), {flag: "wx"});
+    const marker = h.input(`${instructions} ${path}`);
+    writeFileSync(path, png(199));
     assert.deepEqual(marker.images, []);
     assert.ok(!marker.text.includes(path) && !marker.text.includes(instructions));
     assert.ok((await h.call(GENERATE, {prompt: instructions})).isError);
     assert.ok((await h.call(EDIT, {path})).isError);
-    assert.equal(dialogs, 0);
-    const edited = await h.call(EDIT, {}, r => {
-      if (r.details.status === "review") reviewed = Buffer.from(r.content[1].data, "base64");
-    });
-    assert.equal(edited.details.status, "preview");
+    assert.equal((await h.call(EDIT, {})).details.status, "preview");
     assert.ok(!existsSync(join(h.cwd, "media")));
     assert.ok((await h.call(EDIT, {})).isError);
-    h.input(marker.text); // Cannot replay the local placeholder or previous approval.
+    h.input(marker.text);
     assert.ok((await h.call(EDIT, {})).isError);
-    assert.equal(dialogs, 1);
     assert.equal(sent, 1);
-  } finally { h.close() }
+  } finally { rmSync(path, {force:true}); h.close() }
 });
 
 test("queued/injected/ambiguous or headless edit inputs are consumed locally and cannot dispatch", async () => {
@@ -229,7 +243,6 @@ test("queued/injected/ambiguous or headless edit inputs are consumed locally and
   for (const mode of ["rpc", "print"]) {
     const h = harness(renderFixture, false, mode);
     try {
-      h.confirm(async () => assert.fail("no dialog expected"));
       for (const [source, queue, images] of [["extension", undefined, [image]], ["rpc", "steer", [image]],
         ["rpc", undefined, [image, image]], ["rpc", undefined, []], ...(mode === "print" ? [["rpc", undefined, [image]]] : [])] as any[]) {
         assert.equal(h.input(raw, source, queue, images)?.action, "handled");
@@ -245,19 +258,195 @@ test("queued/injected/ambiguous or headless edit inputs are consumed locally and
   }
 });
 
-test("changing scope or disabling the tool while the confirmation is open invalidates even a yes", async () => {
+test("changing scope or disabling the tool before dispatch invalidates a direct submission", async () => {
   const image = {type: "image", mimeType: "image/png", data: png(8).toString("base64")};
   for (const change of ["switch", "disable"]) {
     const h = harness();
     try {
-      h.input("Editar foto:\nCambia el color.", "rpc", undefined, [image]);
-      let dialogs = 0;
-      h.confirm(async () => { dialogs++; if (change === "switch") h.emit("session_before_tree"); else h.disable(); return true });
-      assert.match((await h.call(EDIT, {})).details.code, /cancelled|scope_changed/);
-      assert.equal(dialogs, 1);
+      h.input("Ponle alas a esta foto.", "rpc", undefined, [image]);
+      const result = await h.call(EDIT, {}, () => {
+        if (change === "switch") h.emit("session_before_tree"); else h.disable();
+      });
+      assert.match(result.details.code, /cancelled|scope_changed/);
       assert.ok(!existsSync(join(h.home, "generated_images")));
     } finally { h.close() }
   }
+});
+
+test("an ordinary chat attachment is not an image operation and cannot be reused", async () => {
+  const h = harness(), image = {type: "image", mimeType: "image/png", data: png(8).toString("base64")};
+  try {
+    assert.equal(h.input("¿Qué ves en esta imagen?", "rpc", undefined, [image]), undefined);
+    h.input("Ponle alas a esta foto.", "rpc");
+    assert.equal((await h.call(EDIT, {})).details.code, "not_requested");
+    assert.equal((await h.call(REFERENCE, {})).details.code, "not_requested");
+  } finally { h.close() }
+});
+
+test("reference generation sends the pinned ordered set and instructions without another confirmation", async () => {
+  const prompt = "Crea una figura distinta: contorno de la primera, color de la segunda.", refs = [png(19),png(23)];
+  let calls = 0;
+  const h = harness(undefined, false, "tui", undefined, async req => {
+    calls++; assert.equal(req.prompt,prompt); assert.deepEqual(req.references,refs);
+    return renderFixture(req);
+  });
+  try {
+    const paths = ["A.png","B.png"].map((n,i) => { const path = join(h.root,n); writeFileSync(path,png(i ? 23 : 19,true)); return path });
+    const raw = [SUBMIT,prompt,...paths].join("\n"), marker = h.input(raw);
+    assert.deepEqual(marker.images,[]); assert.match(marker.text,/ss_images_generate_with_references/);
+    for (const content of [...paths,prompt]) assert.ok(!marker.text.includes(content));
+    assert.ok((await h.call(EDIT,{})).isError && (await h.call(GENERATE,{prompt})).isError);
+    assert.ok((await h.call(REFERENCE,{paths})).isError);
+    writeFileSync(paths[0],png(73)); rmSync(paths[1]);
+    const gained = await h.call(REFERENCE,{});
+    assert.equal(gained.details.status,"preview"); assert.ok(!existsSync(join(h.cwd,"media")));
+    assert.ok((await h.call(REFERENCE,{})).isError); h.input(marker.text);
+    assert.ok((await h.call(REFERENCE,{})).isError); assert.equal(calls,1);
+  } finally { h.close() }
+});
+
+test("private reference submissions consume invalid, injected and queued inputs; revocation or corrupt PNG cannot dispatch", async () => {
+  const data = {type:"image", mimeType:"image/png", data:png(74).toString("base64")}, prompt = "Haz un icono nuevo.";
+  for (const mode of ["rpc","print"]) {
+    const h = harness(undefined,false,mode); // any dispatch fails
+    try {
+      const header = "Generar con referencias:", raw = header+"\n"+prompt;
+      for (const [text,source,queue,imgs] of [
+        [raw,"extension",undefined,[data]], [raw,"rpc","followUp",[data]], [raw,"rpc",undefined,[]],
+        [header+"\n"+join(h.root,"absent.png")+"\n"+prompt,"rpc",undefined,[]],
+        [submit(prompt),"rpc","steer",[data]], [raw,"rpc",undefined,[data,data,data,data]],
+        ...(mode === "print" ? [[raw,"rpc",undefined,[data]]] : [])
+      ] as any[]) assert.equal(h.input(text,source,queue,imgs).action,"handled");
+      assert.deepEqual(h.entries,[]);
+      if (mode !== "rpc") continue;
+      const corrupt = {...data, data: Buffer.from("not a PNG").toString("base64")};
+      assert.equal(h.input(raw,"rpc",undefined,[data,corrupt]).action,"handled");
+      assert.ok((await h.call(REFERENCE,{})).isError);
+      h.input(raw,"rpc",undefined,[data]);
+      const result = await h.call(REFERENCE,{},() => h.emit("session_before_tree"));
+      assert.equal(result.details.code,"cancelled");
+      assert.ok(!existsSync(join(h.home,"generated_images")));
+    } finally { h.close() }
+  }
+});
+
+test("corrections use only an intact selected preview; an ambiguous target or missing attachment does not dispatch", async () => {
+  const sent: Buffer[] = [];
+  const h = harness(renderFixture, false, "tui", async req => {
+    sent.push(req.photo);
+    return renderFixture(req);
+  });
+  try {
+    const gen = async (prompt: string) => {
+      h.input(submit(prompt));
+      return h.call(GENERATE, {prompt});
+    };
+    const first = "Un gato con alas.", second = "Un perro que vuela.";
+    const a = await gen(first);
+    await gen(second);
+    const fix = "Haz las alas más pequeñas.";
+    h.input(fix);
+    assert.equal((await h.call(EDIT, {})).details.status, "preview");
+    assert.deepEqual(sent[0], png(Buffer.byteLength(second) % 230));
+    h.input("Gracias.");
+    h.input(fix);
+    assert.equal((await h.call(EDIT, {})).details.status, "preview");
+    assert.deepEqual(sent[1], png(Buffer.byteLength(fix) % 230));
+    h.input("Corrige la vista 1: reduce las alas.");
+    assert.equal((await h.call(EDIT, {})).details.status, "preview");
+    assert.deepEqual(sent[2], png(Buffer.byteLength(first) % 230));
+    h.input("Corrige la vista 1: cambia el color.");
+    writeFileSync(join(h.home, "generated_images", a.details.thread, a.details.file), png(199));
+    assert.equal((await h.call(EDIT, {})).details.code, "source_changed");
+    h.input("En base a esta foto genera un logo.");
+    assert.ok((await h.call(GENERATE, {prompt:"Un logo."})).isError);
+    assert.equal(sent.length, 3);
+    assert.ok(!existsSync(join(h.cwd, "media")));
+  } finally { h.close() }
+});
+
+test("the agent assigns roles to a contextual selection; the host binds the exact two inputs for one turn", async () => {
+  const calls: {photo: Buffer; guide?: Buffer; prompt: string}[] = [];
+  const h = harness(renderFixture, false, "tui", async req => { calls.push(req); return renderFixture(req) });
+  const file = join(tmpdir(), `pi-clipboard-${randomUUID()}.png`);
+  const guide = png(87), caption = "dele ese estilo y los coloes tambien";
+  try {
+    writeFileSync(file, guide, {flag:"wx"});
+    const base = "Una mascota en espiral";
+    h.input(submit(base)); await h.call(GENERATE, {prompt:base});
+    const marker = h.input(`${caption}\n${file}`);
+    assert.deepEqual(marker.images, []); assert.ok(marker.text.includes(caption) && !marker.text.includes(file));
+    writeFileSync(file, png(23));
+    assert.equal((await h.call(EDIT, {base:"preview", path:file})).details.code,"not_requested");
+    assert.equal((await h.call(EDIT, {base:"preview"})).details.status,"preview");
+    assert.equal(calls[0].prompt,caption); assert.deepEqual(calls[0].guide,guide);
+    assert.deepEqual(calls[0].photo,png(Buffer.byteLength(base)%230));
+    assert.ok((await h.call(REFERENCE, {})).isError);
+    h.input(`¿Qué opinas?\n${file}`); h.answer("¿Quieres cambiar la vista o comentar el acabado?");
+    h.input("sí"); assert.ok((await h.call(EDIT,{base:"preview"})).isError);
+    h.input(`Corrige la vista 99 con esta referencia.\n${file}`);
+    assert.equal((await h.call(EDIT,{base:"preview"})).details.code,"no_preview");
+    h.input(`La que quiero modificar es la foto recién pegada.\n${file}`);
+    assert.equal((await h.call(EDIT,{base:"attachment"})).details.status,"preview");
+    assert.equal(calls.length,2); assert.deepEqual(calls[1].photo,png(23)); assert.equal(calls[1].guide,undefined);
+    assert.ok(!existsSync(join(h.cwd,"media")));
+  } finally { rmSync(file,{force:true}); h.close() }
+});
+
+test("a numeric clarification selects the exact preview and resumes the pending recolor, including its palette", async () => {
+  const edits: {prompt: string; photo: Buffer}[] = [];
+  const h = harness(renderFixture, false, "tui", async req => { edits.push(req); return renderFixture(req) });
+  try {
+    for (const prompt of ["Una estrella", "Una estrella plana"]) {
+      h.input(submit(prompt)); await h.call(GENERATE, {prompt});
+    }
+    h.input("la 2");
+    assert.equal((await h.call(EDIT, {})).details.code, "not_requested");
+    const instruction = "cambia la vista 1 o la vista 2 a los colores acordados";
+    h.input(instruction);
+    assert.equal((await h.call(EDIT, {agreedPalette: ["#FFD400", "#2B2D31"]})).details.code, "revision_ambiguous");
+    h.answer("¿La 1 o la 2?");
+    h.input("3");
+    assert.equal((await h.call(EDIT, {})).details.code, "no_preview");
+    h.answer("Hay dos vistas. ¿Cuál prefieres?");
+    h.input("la 2");
+    assert.equal((await h.call(EDIT, {})).details.status, "preview");
+    assert.equal(edits.length, 1);
+    assert.equal(edits[0].prompt, `${instruction}\nPaleta acordada: #FFD400, #2B2D31.`);
+    assert.deepEqual(edits[0].photo, png(Buffer.byteLength("Una estrella plana") % 230));
+  } finally { h.close() }
+});
+
+test("colloquial revisions and an explicitly repeated failed palette change stay on the chosen preview", async () => {
+  const sent: {prompt: string; photo: Buffer}[] = [];
+  const h = harness(renderFixture, false, "tui", async req => {
+    sent.push(req);
+    if (sent.length === 2) throw new ImageError("no_png_missing");
+    return renderFixture(req);
+  });
+  try {
+    h.input(submit("Una mascota"));
+    await h.call(GENERATE, {prompt: "Una mascota"});
+    // Input itself does not dispatch. This harness simulates the chat agent's decision,
+    // not a second intent classifier in the host.
+    h.input("Qué bonita quedó.");
+    h.answer("Gracias.");
+    assert.equal(sent.length, 0);
+    h.input("¿Podríamos dejar la silueta casi plana para que se lea en pequeño?");
+    assert.equal((await h.call(EDIT, {})).details.status, "preview");
+    const raw = "Volvamos a nuestra combinación cromática inicial.", palette = {agreedPalette: ["#FFD400", "#2B2D31"]};
+    h.input(raw);
+    assert.equal((await h.call(EDIT, {agreedPalette: ["otra instrucción"]})).details.code, "palette_needed");
+    assert.equal(sent.length, 1);
+    assert.equal((await h.call(EDIT, palette)).details.code, "no_png_missing");
+    h.answer("No se obtuvo una vista nueva.");
+    assert.equal(sent.length, 2);
+    h.input(raw);
+    assert.equal((await h.call(EDIT, palette)).details.status, "preview");
+    assert.deepEqual(sent[1].photo, sent[2].photo);
+    assert.equal(sent[2].prompt, `${raw}\nPaleta acordada: #FFD400, #2B2D31.`);
+    assert.ok(!existsSync(join(h.cwd, "media")));
+  } finally { h.close() }
 });
 
 test("a Codex home inside the project is rejected before generating", async () => {

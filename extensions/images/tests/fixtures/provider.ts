@@ -1,4 +1,5 @@
 // Offline only: the model deliberately attempts save even for non-approval messages.
+import {createHash} from "node:crypto";
 import {createAssistantMessageEventStream, getCurrentSystemPrompt} from "@earendil-works/pi-ai";
 import type {ExtensionAPI} from "@earendil-works/pi-coding-agent";
 export default function provider(pi: ExtensionAPI) {
@@ -30,17 +31,28 @@ export default function provider(pi: ExtensionAPI) {
           answer = rules.includes("Ask one or two concrete questions") ?
             "¿Qué debería verse y qué emoción quieres transmitir?" : "MISSING_PLANNING_RULE";
         if (raw === "Un faro, con calma nocturna. Sin letras.")
-          answer = rules.includes("Show the final text") ?
-            "Puedes editar este borrador:\n```text\nGenera la imagen con este prompt:\nPortada vertical: faro a la luz de la luna, mar en calma. Sin letras.\n```" : "MISSING_DRAFT_RULE";
+          answer = rules.includes("Don't ask the user to confirm or copy and paste the prompt") ?
+            "Portada vertical: faro a la luz de la luna, mar en calma. Sin letras." : "MISSING_DRAFT_RULE";
+        if (raw === "Inspecciona el contexto sintético.") {
+          const images = messages.flatMap(m => Array.isArray(m.content) ? m.content : []).filter(b => b.type === "image");
+          answer = JSON.stringify({images: images.map(b => createHash("sha256").update(Buffer.from(b.data,"base64")).digest("hex")),
+            privatePrompt: JSON.stringify(messages).includes("REF-FIXTURE-PRIVADO")});
+        }
+        const contextual = raw.startsWith("PNG actual seleccionado con una vista previa disponible (");
+        const guided = contextual && rules.includes("base:'preview'") && raw.endsWith("Traslada el acabado de la muestra al dibujo anterior.");
+        if (contextual && !guided) answer = "No se solicitó editar.";
         const tool = answer || turn.some(m => m.role === "toolResult") ? null :
-            /^Solicitud local de edición de foto \(/u.test(raw) ? "ss_images_edit" :
+            guided ? "ss_images_edit" :
+            /^Solicitud local de generación con referencias \(/u.test(raw) ? "ss_images_generate_with_references" :
+            /^(?:Solicitud local de edición de foto \(|Haz la luna|Corrige la vista)/u.test(raw) ? "ss_images_edit" :
             /^Genera/.test(raw)                              ? "ss_images_generate" :
                                                                "ss_images_save";
         const b = tool ? {
           type: "toolCall",
           id: `fixture-${++serial}`,
           name: tool,
-          arguments: tool === "ss_images_generate" ? {prompt: raw} : {}
+          arguments: guided ? {base:"preview"} : tool === "ss_images_generate" ? {prompt: raw === "Genera la portada" ?
+            "Portada vertical: faro a la luz de la luna, mar en calma. Tinta azul. Sin letras." : raw} : {}
         } :
                          {type: "text", text: answer || "Fin de la prueba."};
         const m: any = {

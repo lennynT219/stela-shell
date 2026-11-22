@@ -6,7 +6,7 @@ import {join} from "node:path";
 import {test} from "node:test";
 import {fileURLToPath} from "node:url";
 import {Codex, type ThreadEvent} from "@openai/codex-sdk";
-import {bundledCli, collect, runEditRequest, startEditTurn, startImageTurn} from "../codex.ts";
+import {bundledCli, collect, runEditRequest, runReferenceRequest, startEditTurn, startImageTurn, startReferenceTurn} from "../codex.ts";
 import {checkedLimits} from "../config.ts";
 import {readOriginal} from "../files.ts";
 import {png} from "./fixture.ts";
@@ -107,9 +107,15 @@ function respond(res: ServerResponse, model: string, n: number, output: {text: s
   res.end();
 }
 
-test("pinned SDK and bundled Codex: a single private edit copy becomes an image input to loopback, not a path in the text", {timeout: 25_000}, async () => {
+for (const mode of ["edit", "guided attribute edit", "guided resemblance edit", "generate with one reference", "generate with three references"] as const) test(`pinned SDK and bundled Codex: ${mode} sends exactly the reviewed image inputs to loopback, not paths in the visual prompt`, {timeout: 25_000}, async () => {
   const {tmp, home, cwd: project, env} = setup(), signal = AbortSignal.timeout(18_000);
-  const reference = png(89), instructions = "Preserva el sujeto de prueba. Cambia el fondo a azul.", file = "edited.png";
+  const guided = mode === "guided attribute edit" || mode === "guided resemblance edit", edit = guided || mode === "edit", single = mode === "generate with one reference";
+  const copies = guided ? [png(89), png(46)] : edit ? [png(89)] : single ? [png(48)] : [png(48), png(127), png(61)];
+  const instructions = mode === "guided resemblance edit" ? "Acércalo al diseño de la muestra, conservando la sonrisa." :
+    mode === "guided attribute edit" ? "Usa solo la textura de la muestra." : edit ? "Preserva el sujeto de prueba. Cambia el fondo a azul." : single ?
+    "Un icono nuevo. Inspírate en la silueta del personaje de referencia, sin calcarla." :
+    "Nuevo icono de una estrella: toma la silueta de la primera y la expresión de la tercera. Sin letras.";
+  const file = "result.png";
   let posts = 0, workspace = "", inputImages: string[] = [], inputText: string[] = [], failure: unknown, checks = 0;
   const started = Promise.withResolvers<string>();
   const server = createServer(async (req, res) => {
@@ -131,31 +137,41 @@ test("pinned SDK and bundled Codex: a single private edit copy becomes an image 
   });
   try {
     const port = await loopbackPort(server);
-    const result = await runEditRequest({home, project, prompt: instructions, photo: reference, signal, checkCurrent: () => { checks++ }}, async (cwd, active) => {
+    const params = {home, project, prompt: instructions, signal, checkCurrent: () => { checks++ }};
+    const names = guided ? ["source.png", "reference-1.png"] : edit ? ["source.png"] : copies.map((_, i) => `reference-${i+1}.png`);
+    const start = async (cwd: string, active: AbortSignal) => {
       workspace = cwd;
-      assert.deepEqual(readdirSync(cwd), ["source.png"]);
-      const staged = join(cwd, "source.png");
-      assert.deepEqual(readFileSync(staged), reference);
-      if (process.platform !== "win32") {
-        assert.equal(statSync(cwd).mode & 0o077, 0);
-        assert.equal(statSync(staged).mode & 0o077, 0);
-      }
-      const cfg = await checkedLimits(bundledCli(), cwd, env, active);
-      const {events} = await startEditTurn(fixtureClient(env, cfg, port), cwd, {prompt: instructions, signal: active});
+      assert.deepEqual(readdirSync(cwd).sort(), [...names].sort());
+      names.forEach((name,i) => {
+        const staged = join(cwd,name);
+        assert.deepEqual(readFileSync(staged), copies[i]);
+        if (process.platform !== "win32") assert.equal(statSync(staged).mode & 0o077, 0);
+      });
+      if (process.platform !== "win32") assert.equal(statSync(cwd).mode & 0o077, 0);
+      const cfg = await checkedLimits(bundledCli(), cwd, env, active), client = fixtureClient(env, cfg, port);
+      const r = {...params, signal:active};
+      const {events} = edit ? await startEditTurn(client, cwd, r, guided) : await startReferenceTurn(client, cwd, r, copies.length);
       return {events: (async function*() {
         for await (const e of events) {
           if (e.type === "thread.started") started.resolve(e.thread_id);
           yield e;
         }
       })()};
-    });
+    };
+    const result = edit ? await runEditRequest({...params, photo: copies[0], guide: guided ? copies[1] : undefined}, start) : await runReferenceRequest({...params, references: copies}, start);
     if (failure) throw failure;
     assert.equal(posts, 1);
-    assert.equal(inputImages.length, 1);
-    assert.equal(inputImages[0], "data:image/png;base64," + reference.toString("base64"));
-    const brief = inputText.find(s => s.includes("Edit the single attached photo"));
-    assert.ok(brief && !brief.includes("source.png") && !brief.includes(project));
-    assert.deepEqual(JSON.parse(brief.split("\n").at(-1)!), {instructions});
+    assert.deepEqual(inputImages, copies.map(buf => "data:image/png;base64," + buf.toString("base64")));
+    const brief = inputText.find(s => s.includes(guided ? "Edit the FIRST image" : edit ? "Edit the single attached photo" : "Generate from scratch, not a photo edit"));
+    assert.ok(brief && !names.some(n => brief.includes(n)) && !brief.includes(project));
+    if (guided) {
+      assert.match(brief, /transfer only that attribute/);
+      assert.match(brief, /reshape its silhouette, proportions/);
+      assert.match(brief, /preserve or exclude take precedence/);
+    }
+    const data = JSON.parse(brief.split("\n").at(-1)!);
+    if (edit) assert.deepEqual(data, {instructions});
+    else { assert.equal(data.request, instructions); assert.ok(brief.includes(`${copies.length} attached visual reference`)); }
     assert.ok(checks > 0 && workspace && !existsSync(workspace));
     assert.deepEqual(readOriginal(home, result.thread, result.file).bytes, png(101));
   } finally {
