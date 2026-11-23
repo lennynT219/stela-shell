@@ -15,7 +15,8 @@ export default function fixture(pi: ExtensionAPI) {
     ctx.ui.setWidget("fixture-screen", (tui) => { screen = tui; return { render: () => [], invalidate() {} }; });
   });
   pi.registerShortcut("f8", { description: "Read synthetic fixture frame", handler: async ctx => {
-    writeFileSync(out + ".tmp", JSON.stringify({ lines: screen.getScreenLines(), draft: ctx.ui.getEditorText() })); renameSync(out + ".tmp", out);
+    const lines = screen.mode === "regular" ? screen.captureRenderState().previousLines.slice(-screen.terminal.rows) : screen.getScreenLines();
+    writeFileSync(out + ".tmp", JSON.stringify({ lines, draft: ctx.ui.getEditorText() })); renameSync(out + ".tmp", out);
   } });
   pi.registerShortcut("f5", { description: "Start synthetic task", handler: async ctx => {
     const n = ++serial;
