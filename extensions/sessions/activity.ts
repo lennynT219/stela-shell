@@ -4,7 +4,7 @@ import { delimiter, isAbsolute } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { activeState, REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
-import { readCodexQuota } from "./codex-quota.ts";
+import { readCodexQuota, type Quota } from "./codex-quota.ts";
 import { watchGit } from "./git-summary.ts";
 import { activityView, type Drawing, type ViewState } from "./activity-view.ts";
 import { herdrRoute, watchQuestions, type AttentionTransport, type PeerQuestion } from "./attention.ts";
@@ -45,7 +45,7 @@ async function attach(tui: TUI, address: string, signal: AbortSignal) {
     });
   } finally { if (!signal.aborted) { tui.start(); tui.requestRender(true); } }
 }
-export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDialog: (c: Component) => boolean, dependencies = { route: herdrRoute, check: checkTerminal, attach }, readQuota = readCodexQuota) {
+export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDialog: (c: Component) => boolean, dependencies = { route: herdrRoute, check: checkTerminal, attach }, readQuota: (signal: AbortSignal, ctx: ExtensionContext) => Promise<Quota> = readCodexQuota) {
   let owner: ExtensionContext | undefined, session = "", host: TUI | undefined;
   let view: ReturnType<typeof activityView> | undefined, watching: ReturnType<typeof watchQuestions> | undefined;
   let lifetime = new AbortController(), jumping = false;
@@ -56,12 +56,15 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   let quotaRequest: AbortController | undefined;
   const clearQuota = () => { quotaRequest?.abort(); quotaRequest = undefined; state.quota = undefined; };
   const loadQuota = () => {
+    const ctx = owner;
+    if (!ctx) return;
     const request = quotaRequest = new AbortController();
     state.quota = {state:"loading"};
-    void readQuota(request.signal).then(q => {
+    const settle = (q: Quota) => {
       if (request !== quotaRequest) return;
       state.quota = q; host?.requestRender();
-    });
+    };
+    void readQuota(request.signal, ctx).then(settle, () => settle({state:"unavailable"}));
   };
   const toggle = (keyboard = false) => {
     if (!view || !owner) return;
@@ -114,6 +117,11 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
     e.claim(); view?.refresh();
   });
   pi.on("session_start", start); pi.on("session_tree", start); pi.on("session_shutdown", stop);
+  pi.on("model_select", (e, ctx) => {
+    if (owns(ctx) && state.open && (e.model.provider === "openai-codex" || e.previousModel?.provider === "openai-codex")) {
+      clearQuota(); loadQuota(); host?.requestRender();
+    }
+  });
   pi.registerCommand("ss-activity", { description: "Abrir o cerrar el Panel de Git, actividad y preguntas.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
   pi.registerShortcut("alt+a", { description: "Abrir/cerrar actividad", handler: async ctx => { if (owns(ctx)) toggle(true); } });
   pi.registerShortcut("alt+j", { description: "Ver la pregunta pendiente en la sesión de origen", handler: async ctx => { if (owns(ctx)) await question(state.questions[0]); } });

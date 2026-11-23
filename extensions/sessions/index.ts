@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, sendContext, SessionError, type Envelope, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
+import { readCodexQuota, readPiQuota } from "./codex-quota.ts";
 import { registerSpeed } from "./codex-speed.ts";
 import { registerUsageFooter } from "./usage-footer.ts";
 import { registerCommandSearch } from "./command-search.ts";
@@ -261,7 +262,8 @@ export default async function sessions(pi: ExtensionAPI): Promise<void> {
   registerTurnHint(pi, CustomEditor, action => drawing.getKeybindings().getKeys(action), truncateToWidth);
   const { registerActivity } = await import("./activity.ts");
   const panel = registerActivity(pi, { HStack, truncateToWidth, matchesKey: drawing.matchesKey, wrap: drawing.wrapTextWithAnsi },
-    c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent);
+    c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent,
+    undefined, (signal, ctx) => ctx.model?.provider === "openai-codex" ? readPiQuota(ctx, readStoredCredential, signal) : readCodexQuota(signal));
   const { registerPanelEditor } = await import("./panel-editor.ts");
   registerPanelEditor(pi, CustomEditor, drawing, panel.toggle);
   registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0), incomingRenderer: familyMessage("sessions",drawing), panel });

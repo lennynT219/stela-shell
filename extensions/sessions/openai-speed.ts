@@ -4,8 +4,8 @@ import { advertisedTiers, record, type Catalog } from "./speed-tiers.ts";
 
 const base = "https://api.openai.com/v1";
 const maxBytes = 8 * 1024 * 1024;
-export type ReadCredential = (provider: "openai") => unknown;
-const stamp = (token: string) => createHash("sha256").update(token).digest("hex");
+export type ReadCredential = (provider: "openai" | "openai-codex") => unknown;
+export const stamp = (token: string) => createHash("sha256").update(token).digest("hex");
 
 // Cheap checks only: the footer renders frequently and must never resolve or read a credential.
 export function directRoute(ctx: ExtensionContext) {
@@ -34,7 +34,7 @@ export function directTiers(catalog: unknown, model: string): Catalog {
   return rows.length === 0 ? [] : rows.length === 1 ? advertisedTiers(rows[0].service_tiers) : undefined;
 }
 
-async function readBody(response: Response, signal: AbortSignal): Promise<unknown> {
+export async function readBody(response: Response, signal: AbortSignal): Promise<unknown> {
   if (response.status !== 200 || !response.body || Number(response.headers.get("content-length")) > maxBytes) {
     await response.body?.cancel(); return undefined;
   }

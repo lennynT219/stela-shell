@@ -1,8 +1,11 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { codexRoute, hasCodexOAuth, readPiCodex } from "./codex-pi.ts";
+import type { ReadCredential } from "./openai-speed.ts";
 import { exchange, localCommand, record, type Command, type Conversation } from "./codex-stdio.ts";
 export { readOnlyArgs as quotaArgs } from "./codex-stdio.ts";
 
 export type Window = { minutes?: number; used: number; reset?: number; kind: "Principal" | "Secundaria" };
-export type Quota = { state: "ok"; windows: Window[] } | { state: "loading" | "unavailable" | "signed-out" };
+export type Quota = { state: "ok"; windows: Window[] } | { state: "loading" | "unavailable" | "signed-out" | "pi-signed-out" };
 const unavailable: Quota = {state:"unavailable"};
 
 /** Project just the Codex bucket. Never expose account identifiers, credits, other services or raw errors. */
@@ -28,8 +31,27 @@ export function decodeQuota(v:unknown): Quota {
   return windows.length ? {state:"ok",windows} : unavailable;
 }
 
+// The raw Codex usage endpoint returns durations in seconds, not app-server minutes.
+export function decodePiQuota(body: unknown): Quota {
+  if (!record(body) || !record(body.rate_limit)) return unavailable;
+  const window = (w: unknown) => {
+    if (w == null) return undefined;
+    if (!record(w)) return {};
+    const seconds = w.limit_window_seconds;
+    return { usedPercent: w.used_percent, windowDurationMins: typeof seconds === "number" && seconds % 60 === 0 ? seconds / 60 : undefined,
+      resetsAt: w.reset_at };
+  };
+  return decodeQuota({rateLimits:{primary:window(body.rate_limit.primary_window),secondary:window(body.rate_limit.secondary_window)}});
+}
+
+export async function readPiQuota(ctx: ExtensionContext, read: ReadCredential, signal: AbortSignal): Promise<Quota> {
+  if (!codexRoute(ctx)) return unavailable;
+  if (!hasCodexOAuth(ctx)) return { state:"pi-signed-out" };
+  return decodePiQuota((await readPiCodex(ctx, read, "usage", signal))?.body);
+}
+
 export function quotaLines(q:Quota, now = new Date()): string[] {
-  if (q.state !== "ok") return [q.state === "loading" ? "Codex · Consultando…" : q.state === "signed-out" ? "Codex · Inicia sesión" : "Codex · No disponible"];
+  if (q.state !== "ok") return [q.state === "loading" ? "Codex · Consultando…" : q.state === "pi-signed-out" ? "Codex · Inicia sesión en Pi" : q.state === "signed-out" ? "Codex · Inicia sesión" : "Codex · No disponible"];
   const rows = q.windows.map(w => {
     const m=w.minutes, period = !m ? w.kind : m%1440===0 ? `${m/1440} d` : m%60===0 ? `${m/60} h` : `${m} min`;
     const d=w.reset ? new Date(w.reset*1000) : undefined;

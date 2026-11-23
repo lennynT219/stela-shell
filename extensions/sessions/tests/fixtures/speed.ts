@@ -19,7 +19,22 @@ export default function fixture(_pi: ExtensionAPI) {
         ]});
       }
       if (String(url) !== "https://api.openai.com/v1/responses" || options?.method !== "POST") return new Response("offline", {status:403});
-    } else if (String(url) !== "https://chatgpt.com/backend-api/codex/responses" || options?.method !== "POST") return new Response("offline", {status: 403});
+    } else {
+      const headers = new Headers(options?.headers);
+      if (options?.method === "GET" && options.redirect === "error" && headers.get("chatgpt-account-id") === "fixture" &&
+          headers.get("authorization") === process.env.SS_FIXTURE_CODEX_AUTH) {
+        if (String(url) === "https://chatgpt.com/backend-api/codex/models?client_version=0.171.0") {
+          appendFileSync(trace, '{"catalog":true}\n');
+          return Response.json({models:[{slug:"gpt-5.6-luna",visibility:"list",service_tiers:[{id:"priority",name:"Fast"}]}]});
+        }
+        if (String(url) === "https://chatgpt.com/backend-api/wham/usage") {
+          appendFileSync(trace, '{"quota":true}\n');
+          return Response.json({rate_limit:{primary_window:{used_percent:64,limit_window_seconds:18_000},
+            secondary_window:{used_percent:28,limit_window_seconds:604_800}}});
+        }
+      }
+      if (String(url) !== "https://chatgpt.com/backend-api/codex/responses" || options?.method !== "POST") return new Response("offline", {status: 403});
+    }
     const body = JSON.parse(typeof options.body === "string" ? options.body : zstdDecompressSync(options.body as Uint8Array).toString());
     appendFileSync(trace, JSON.stringify({model:body.model,tier:body.service_tier ?? null}) + "\n");
     const n = ++calls, text = `Respuesta local ${n}`, id = `msg_${n}`;
