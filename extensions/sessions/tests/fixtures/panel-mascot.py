@@ -24,7 +24,22 @@ def check(protocol):
             for m in ['M','m']: t.key(f'\x1b[<0;{col+1};{row+1}{m}'.encode())
         try:
             t.wait(lambda l,d:target(l),'visible at rest'); t.paste(DRAFT)
-            lines=t.wait(lambda l,d:target(l) and d==DRAFT,'draft before click'); hit(lines,True)
+            lines=t.wait(lambda l,d:target(l) and d==DRAFT,'draft before click')
+            if protocol=='kitty':
+                # Frames must change without typing, moving the anchor or reallocating the hit rectangle.
+                anchor=None; images=set()
+                def floated(lines,draft):
+                    nonlocal anchor
+                    if draft!=DRAFT or not target(lines): return False
+                    row,s=target(lines); prefix,seq=s.split('\x1b_G',1)
+                    header=seq.split(';',1)[0]; dims=tuple(re.search(r'c=(\d+),r=(\d+)',header).groups())
+                    where=(row,len(prefix),dims)
+                    if anchor is None: anchor=where
+                    assert where==anchor,(where,anchor)
+                    images.add(re.search(r'(?:^|,)i=(\d+)',header)[1])
+                    return len(images)==6
+                lines=t.wait(floated,'five float heights and one blink at the original hit target')
+            hit(lines,True)
             lines=t.wait(lambda l,d:target(l) and has(l,'Panel · [Cerrar') and has(l,DRAFT),'wide rail and mascot coexist'); hit(lines)
             t.wait(lambda l,d:not has(l,'Panel · [Cerrar') and d==DRAFT,'second tap closes rail')
             t.size(38); lines=t.wait(lambda l,d:target(l) and len(target(l)[1].split('\x1b_G')[0])<=38 and d==DRAFT and not has(l,'Sin tareas activas'),'narrow editor'); hit(lines)
