@@ -55,7 +55,7 @@ export function registerProjectCommands(pi: ExtensionAPI, env: NodeJS.ProcessEnv
     } });
   };
 
-  owned("ss-project", "Seleccionar o crear el Project principal de esta carpeta", async (ctx, brain, signal, current) => {
+  owned("ss-project", "Elegir o crear el proyecto de Brain vinculado a esta carpeta", async (ctx, brain, signal, current) => {
     need(current() && !hooks.writesPaused());
     const reservation = reserveProjectAssociation(ctx, brain.authority);
     need(reservation);
@@ -131,7 +131,7 @@ export function registerProjectCommands(pi: ExtensionAPI, env: NodeJS.ProcessEnv
     }
   });
 
-  owned("ss-knowledge", "Activar, desactivar o restablecer fuentes adicionales de Knowledge", async (ctx, brain, signal, current) => {
+  owned("ss-knowledge", "Activar, desactivar o restablecer fuentes de conocimiento adicionales", async (ctx, brain, signal, current) => {
     const canRead = () => current() && pi.getActiveTools().includes("ss_knowledge_list");
     need(canRead());
     const scope = resolveScope(ctx.cwd, env);

@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, sendContext, SessionError, type Envelope, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
+import { registerCommandSearch } from "./command-search.ts";
 import type { OpenTransport, SessionTransport } from "./protocol.ts";
 import { openPrimaryActivity, type ActivityOwner } from "../primary-activity.ts";
 
@@ -250,6 +251,7 @@ export default async function sessions(pi: ExtensionAPI): Promise<void> {
   const { HStack, Text, truncateToWidth } = drawing;
   const { registerBlocks, familyMessage } = await import("../blocks/index.ts");
   registerBlocks(pi,{ ...drawing, highlightCode, getLanguageFromPath });
+  registerCommandSearch(pi);
   const { registerActivity } = await import("./activity.ts");
   registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0), incomingRenderer: familyMessage("sessions",drawing), panel: registerActivity(pi, { HStack, truncateToWidth },
     c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent) });
