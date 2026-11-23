@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { bundledCodexBin } from "../../codex-runtime.ts";
-import { querySpeeds, registerCodexSpeed } from "../codex-speed.ts";
+import { querySpeeds, registerSpeed } from "../codex-speed.ts";
 
 const fast = {id:"priority", name:"Fast"} as const, ultra = {id:"example_tier", name:"Ultrafast"} as const;
 const row = {id:"catalog-id", model:"synthetic", hidden:false, serviceTiers:[fast, ultra]};
@@ -29,8 +29,8 @@ test("explicit, revocable choice applies only to a matching Codex chat request; 
   const model={provider:"openai-codex",api:"openai-codex-responses",id:"synthetic",baseUrl:"https://chatgpt.com/backend-api"};
   const session="fixture", ctx:any={mode:"tui",model:{...model},sessionManager:{getSessionId:()=>session},isIdle:()=>true,
     ui:{notify:()=>{},select:async(_title:string,items:string[])=>{assert.equal(items[0],"Estándar"); return pick;}}};
-  const speed=registerCodexSpeed({on:(name:string,h:Function)=>handlers[name]=h,registerCommand:(_n:string,c:any)=>{command=c.handler;}} as any,
-    async()=>{hits++; if(wait) await new Promise<void>(r=>wait=r); return catalog;});
+  const speed=registerSpeed({on:(name:string,h:Function)=>handlers[name]=h,registerCommand:(_n:string,c:any)=>{command=c.handler;}} as any,
+    ()=>{throw Error("Codex must not read a direct credential");}, async()=>{hits++; if(wait) await new Promise<void>(r=>wait=r); return catalog;});
   const menu=()=>command!("",ctx), emit=(name:string,event:object={})=>handlers[name](event,ctx);
   const body={model:model.id,stream:true,store:false,include:["reasoning.encrypted_content"],input:[],prompt_cache_key:session};
   const apply=(payload:any=body)=>emit("before_provider_request",{payload});

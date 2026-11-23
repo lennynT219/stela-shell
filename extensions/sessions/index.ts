@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, sendContext, SessionError, type Envelope, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
-import { registerCodexSpeed } from "./codex-speed.ts";
+import { registerSpeed } from "./codex-speed.ts";
 import { registerUsageFooter } from "./usage-footer.ts";
 import { registerCommandSearch } from "./command-search.ts";
 import { registerTurnHint } from "./turn-hint.ts";
@@ -250,13 +250,13 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
 
 export default async function sessions(pi: ExtensionAPI): Promise<void> {
   if (process.env.STELA_SUBAGENT_CHILD) return;
-  const { getAgentDir, CustomEditor, ExtensionSelectorComponent, ExtensionInputComponent, ExtensionEditorComponent, highlightCode, getLanguageFromPath } = await import("@earendil-works/pi-coding-agent");
+  const { getAgentDir, readStoredCredential, CustomEditor, ExtensionSelectorComponent, ExtensionInputComponent, ExtensionEditorComponent, highlightCode, getLanguageFromPath } = await import("@earendil-works/pi-coding-agent");
   const drawing = await import("@earendil-works/pi-tui");
   const { HStack, Text, truncateToWidth } = drawing;
   const { registerBlocks, familyMessage } = await import("../blocks/index.ts");
   registerBlocks(pi,{ ...drawing, highlightCode, getLanguageFromPath });
   registerWriteScope(pi, getAgentDir);
-  registerUsageFooter(pi, truncateToWidth, registerCodexSpeed(pi));
+  registerUsageFooter(pi, truncateToWidth, registerSpeed(pi, readStoredCredential));
   registerCommandSearch(pi);
   registerTurnHint(pi, CustomEditor, action => drawing.getKeybindings().getKeys(action), truncateToWidth);
   const { registerActivity } = await import("./activity.ts");
