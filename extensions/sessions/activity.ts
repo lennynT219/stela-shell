@@ -4,6 +4,7 @@ import { delimiter, isAbsolute } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { activeState, REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
+import { watchGit } from "./git-summary.ts";
 import { activityView, type Drawing, type ViewState } from "./activity-view.ts";
 import { herdrRoute, watchQuestions, type AttentionTransport, type PeerQuestion } from "./attention.ts";
 import type { SessionTransport } from "./protocol.ts";
@@ -49,7 +50,13 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   let lifetime = new AbortController(), jumping = false;
   const state: ViewState = { open: false, tasks: [], questions: [] };
   const owns = (ctx: ExtensionContext) => ctx.mode === "tui" && owner?.sessionManager === ctx.sessionManager && session === ctx.sessionManager.getSessionId();
-  const toggle = () => { if (view) { state.open = !state.open; view.refresh(); } };
+  let stopGit: (() => void) | undefined;
+  const clearGit = () => { stopGit?.(); stopGit = undefined; state.git = undefined; };
+  const toggle = () => {
+    if (!view || !owner) return;
+    clearGit(); state.open = !state.open; view.refresh();
+    if (state.open) stopGit = watchGit(owner.cwd, row => { state.git = row; host?.requestRender(); });
+  };
   let displayRoute: ReturnType<typeof herdrRoute> = null;
   const canOpen = (q: PeerQuestion, r = displayRoute) => !!r && !!q.route && q.route.core === r.core && q.route.address !== r.address;
   const question = async (q?: PeerQuestion) => {
@@ -66,7 +73,7 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   };
   const stopPeers = () => { const old = watching; watching = undefined; old?.close(); };
   const stop = () => {
-    lifetime.abort(); stopPeers(); view?.dispose();
+    lifetime.abort(); stopPeers(); clearGit(); view?.dispose();
     owner?.ui.setWidget(widgetKey, undefined); owner = undefined; host = view = undefined;
     state.open = false; state.tasks = []; state.questions = []; jumping = false; session = "";
   };
@@ -88,7 +95,7 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
     e.claim(); view?.refresh();
   });
   pi.on("session_start", start); pi.on("session_tree", start); pi.on("session_shutdown", stop);
-  pi.registerCommand("ss-activity", { description: "Abrir o cerrar el Panel de actividad y preguntas.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
+  pi.registerCommand("ss-activity", { description: "Abrir o cerrar el Panel de Git, actividad y preguntas.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
   pi.registerShortcut("alt+a", { description: "Abrir/cerrar actividad", handler: async ctx => { if (owns(ctx)) toggle(); } });
   pi.registerShortcut("alt+j", { description: "Ver la pregunta pendiente en la sesión de origen", handler: async ctx => { if (owns(ctx)) await question(state.questions[0]); } });
   return {

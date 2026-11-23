@@ -2,8 +2,9 @@ import type { Component, HStack, OverlayHandle, TUI, TuiMouseEvent } from "@eare
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PeerQuestion } from "./attention.ts";
 
+import type { GitSummary } from "./git-summary.ts";
 import type { TaskRow } from "../activity-events.ts";
-export interface ViewState { open: boolean; tasks: TaskRow[]; questions: PeerQuestion[] }
+export interface ViewState { open: boolean; tasks: TaskRow[]; questions: PeerQuestion[]; git?: GitSummary }
 export interface ViewActions { toggle(): void; question(q: PeerQuestion): void; canOpen(q: PeerQuestion): boolean }
 export interface Drawing { HStack: typeof HStack; truncateToWidth(s: string, width: number): string; matchesKey?: typeof import("@earendil-works/pi-tui").matchesKey }
 type Host = TUI & { mode?: string; layoutRoot?: Component; setLayoutRoot?(c: Component): void; getFocusedComponent?(): Component | null };
@@ -31,6 +32,15 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     return n && !state.open ? [{ text: `${n} ${n === 1 ? "tarea en curso" : "tareas en curso"} · [Ver actividad · Alt+A]`, key: "toggle", action: actions.toggle }] : [];
   }
   function panel(width: number, sheetMode = false): Line[] {
+    const g = state.git;
+    let gitRow: Line[] = [];
+    if (g) {
+      const up = `↑${g.ahead ?? "—"}`, down = `↓${g.behind ?? "—"}`, add = `+${g.added ?? "?"}`, del = `−${g.removed ?? "?"}`;
+      const room = Math.max(1, width - (up.length + down.length + add.length + del.length + 6));
+      const branch = draw.truncateToWidth(plain(g.branch),room);
+      const cyan = theme.appearance === "light" ? {r:0,g:112,b:124} : {r:93,g:210,b:224};
+      gitRow = [{ text: `${theme.fg("accent",branch)}  ${theme.style(up,{fg:{kind:"rgb",...cyan}})} ${theme.fg("warning",down)}  ${theme.fg("toolDiffAdded",add)} ${theme.fg("toolDiffRemoved",del)}` }];
+    }
     const entries: Line[] = [
       ...state.questions.map(q => ({ text: `${actions.canOpen(q) ? "[Ver pregunta]" : "Ver en origen"} · ${name(q)}`, role: "warning" as const, key: `${q.id}:${q.token}`,
         action: actions.canOpen(q) ? () => actions.question(q) : undefined })),
@@ -39,6 +49,7 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     const size = Math.max(1, Math.min(7, Math.floor(tui.terminal.rows / 3) - 2));
     const pages = Math.max(1, Math.ceil(entries.length / size)); page = Math.min(page, pages - 1);
     return [{ text: sheetMode ? "Panel · [Cerrar]" : "Panel · [Cerrar · Alt+A]", key: "toggle", action: actions.toggle, role: "accent" },
+      ...gitRow,
       ...(entries.length ? entries.slice(page * size, (page + 1) * size) : [{ text: "Sin tareas activas", role: "muted" as const }]),
       ...(pages > 1 ? [{ text: `[Más · ${page + 1}/${pages}]`, key: `more:${page}`, action: () => { page = (page + 1) % pages; tui.requestRender(); } }] : [])];
   }
