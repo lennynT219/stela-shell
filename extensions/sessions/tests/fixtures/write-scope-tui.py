@@ -38,7 +38,7 @@ with workspace() as (root, profile):
     t=launch()
     try:
         send(t,'OTRO'); finish(t,'OTRO'); assert (external/'otro.fish').read_text()=='otro'
-        send(t,'/ss-permisos'); output(t,['Revocar un permiso',str(external/'*.fish')]); t.key(b'\x1b[B\r'); output(t,['Permiso revocado'])
+        send(t,'/ss-permissions'); output(t,['Revocar un permiso',str(external/'*.fish')]); t.key(b'\x1b[B\r'); output(t,['Permiso revocado'])
         send(t,'CANCELAR'); output(t,['Escribir fuera del proyecto',str(config)]); t.key(b'\x1b'); finish(t,'CANCELAR'); assert config.read_text()=='actualizado'
     finally: t.close()
     print('Linux file tool permissions verified in two Pi processes')

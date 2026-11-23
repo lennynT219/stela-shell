@@ -109,7 +109,7 @@ export function registerWriteScope(pi: ExtensionAPI, profile: () => string) {
           requireSafe(current());
           if (choice === remember) {
             const opts = candidates(target), labels = opts.map(display);
-            const pick = await ctx.ui.select(`Recordar para ${project}\n${labels.join("\n")}\nSolo edit y write, hasta revocar con /ss-permisos`, [cancel,...labels], {signal:ctx.signal});
+            const pick = await ctx.ui.select(`Recordar para ${project}\n${labels.join("\n")}\nSolo edit y write, hasta revocar con /ss-permissions`, [cancel,...labels], {signal:ctx.signal});
             const rule = opts.find(r => display(r)===pick);
             if (!rule) return deny("No se guardó ningún permiso.");
             requireSafe(current()); store.add(rule);
@@ -119,7 +119,7 @@ export function registerWriteScope(pi: ExtensionAPI, profile: () => string) {
       requireSafe(current()); event.input.path = target; // Native execution uses the reviewed canonical name.
     } catch { return deny("No se pudo verificar el destino o el permiso de escritura. Operación bloqueada."); }
   });
-  pi.registerCommand("ss-permisos", {description:"Ver y revocar permisos de escritura externa de esta carpeta", async handler(_args,ctx) {
+  pi.registerCommand("ss-permissions", {description:"Ver y revocar permisos de escritura externa de esta carpeta", async handler(_args,ctx) {
     if (ctx.mode!=="tui" || !ctx.hasUI || prompt) return;
     prompt=true; const start=generation;
     try {
