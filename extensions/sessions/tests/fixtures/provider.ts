@@ -51,6 +51,15 @@ export default function provider(pi: ExtensionAPI) {
             const read = context.messages.findLast((message: any) => message.role === "toolResult" && message.toolName === "read");
             text(`Outcome: ${read && !read.isError ? "answered" : "blocked"}\nEvidence: ${read ? asText(read) : "missing"}\nLimitations: deterministic fixture, not a real-model compliance check.`);
           }
+        } else if (action === "write-scope") {
+          const input = context.messages.findLast(m => m.role === "user");
+          const token = input && asText(input);
+          if (context.messages.at(-1)?.role === "toolResult") text(`FIN_${token}`);
+          else if (token === "INTERNO") tool("write",{path:"local.txt",content:"ok"});
+          else if (token === "CANCELAR") tool("write",{path:"enlace/config.fish",content:"cancelled"});
+          else if (token === "RECORDAR") tool("edit",{path:"enlace/config.fish",edits:[{oldText:"original",newText:"actualizado"}]});
+          else if (token === "OTRO") tool("codemode",{code:"text(await tools.write({path:'enlace/otro.fish',content:'otro'}))"});
+          else text("UNEXPECTED_INPUT");
         } else if (calls > 8) text("UNEXPECTED_FIXTURE_LOOP");
         else if (action.startsWith("work-mixed-")) {
           const prompt = context.messages.findLast((message: any) => message.role === "user" && /^(SEED|SEND):/.test(asText(message)));

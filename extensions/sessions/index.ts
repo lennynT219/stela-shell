@@ -4,6 +4,7 @@ import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECOND
 import { PeerTransport } from "./transport.ts";
 import { registerCommandSearch } from "./command-search.ts";
 import { registerTurnHint } from "./turn-hint.ts";
+import { registerWriteScope } from "./write-scope.ts";
 import type { OpenTransport, SessionTransport } from "./protocol.ts";
 import { openPrimaryActivity, type ActivityOwner } from "../primary-activity.ts";
 
@@ -252,6 +253,7 @@ export default async function sessions(pi: ExtensionAPI): Promise<void> {
   const { HStack, Text, truncateToWidth } = drawing;
   const { registerBlocks, familyMessage } = await import("../blocks/index.ts");
   registerBlocks(pi,{ ...drawing, highlightCode, getLanguageFromPath });
+  registerWriteScope(pi, getAgentDir);
   registerCommandSearch(pi);
   registerTurnHint(pi, CustomEditor, action => drawing.getKeybindings().getKeys(action), truncateToWidth);
   const { registerActivity } = await import("./activity.ts");

@@ -4,6 +4,12 @@ An owned stela-shell capability using Pi's public extension API. It connects **l
 
 Canonical tools use the `ss` namespace and short titles **Sesiones** / **Enviar mensaje**. See **Naming conventions** in the StelaShell Brain Project: update explicit tool selections and name-based permission rules before operator-controlled reload. Native, presence, profile and persisted custom-message names are deliberately preserved; this is not a transport/profile migration.
 
+## External writes: Linux file-tool preflight
+
+In the primary Linux session, the Sessions extension adds a location check to Pi's `edit` and `write` calls, including nested calls made by Codemode. The project is the canonical session working directory, not a Git root inferred from a parent directory. There is no extra location prompt inside it. When the resolved target is outside and no rule matches, the TUI shows the operation and real filename. Cancel or Esc blocks the call. **Permitir una vez** permits this call only. **Permitir y recordar** lets the operator select the exact file or, where available, explicitly select files with the same extension in that one directory (no subdirectories). The choice is scoped to this folder and profile, not to every Pi project. `/ss-permisos` lists and revokes rules. New grants require the TUI; they are never inferred from a tool result or a peer message.
+
+Rules live under `ss-write-rules/` in the local Pi profile, not in Git or Brain. The check resolves existing symlinks, checks missing path components from their nearest existing ancestor, refuses dangling links and multiply-linked files, and checks the canonical name again after approval. It does not grant filesystem rights or override a denial from Pi or another extension. This is **file-tool preflight, not an OS sandbox**: it does not mediate arbitrary shell commands, host extensions, background processes, or filesystem changes racing execution after preflight. No shell approval should be inferred from a saved file rule. This version does not add this gate on Windows or macOS.
+
 ## Find actions from the editor
 
 Use Pi’s existing `/` menu. For example, type `/proyecto` to find `/ss-project` (“Elegir o crear el proyecto de Brain vinculado a esta carpeta”). With the suggestion selected and the default keybindings, **Tab** inserts the canonical command and leaves it editable; **Enter** opens the project selector. Browsing suggestions, highlighting a project or cancelling with **Esc** does not change the binding. `/proyecto` is a search term, not an executable alias.
