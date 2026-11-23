@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { devNull } from "node:os";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -11,8 +10,14 @@ export async function readGitSummary(cwd: string, signal: AbortSignal): Promise<
   const env: NodeJS.ProcessEnv = { ...process.env, LC_ALL: "C", GIT_ALLOW_PROTOCOL: "", GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" };
   // The panel describes the session folder even if Pi was launched from a Git hook.
   for (const key of ["GIT_DIR","GIT_COMMON_DIR","GIT_WORK_TREE","GIT_INDEX_FILE","GIT_OBJECT_DIRECTORY","GIT_ALTERNATE_OBJECT_DIRECTORIES","GIT_NAMESPACE"]) delete env[key];
-  const git = async (...args: string[]) => (await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false", ...args],
-    { cwd, signal, env, windowsHide: true, timeout: 2500, maxBuffer: 128 * 1024 })).stdout;
+  const git = async (...args: string[]) => {
+    const command = exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false", ...args],
+      { cwd, signal, env, windowsHide: true, timeout: 2500, maxBuffer: 128 * 1024 });
+    // Supply EOF without a null-device path; exec still reports Git exit and cancellation.
+    command.child.stdin?.on("error", () => {});
+    command.child.stdin?.end();
+    return (await command).stdout;
+  };
   let row: GitSummary | undefined;
   try {
     // Exclude all paths: only Git's machine-readable branch headers are needed, even in a huge dirty tree.
@@ -21,7 +26,7 @@ export async function readGitSummary(cwd: string, signal: AbortSignal): Promise<
     if (!head || !revision || (!oid.test(revision) && revision !== "(initial)")) return;
     const ab = /^# branch\.ab \+(\d+) -(\d+)$/m.exec(status);
     row = { branch: head === "(detached)" ? `HEAD@${revision.slice(0,7)}` : head, ahead: ab?.[1], behind: ab?.[2] };
-    const base = revision === "(initial)" ? (await git("hash-object", "-t", "tree", "--", devNull)).trim() : revision;
+    const base = revision === "(initial)" ? (await git("hash-object", "-t", "tree", "--stdin")).trim() : revision;
     if (!oid.test(base)) return row;
     let drivers = "";
     try { drivers = await git("config", "--null", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|process)$"); }
