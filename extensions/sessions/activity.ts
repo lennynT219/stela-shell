@@ -4,6 +4,7 @@ import { delimiter, isAbsolute } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { activeState, REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
+import { readCodexQuota } from "./codex-quota.ts";
 import { watchGit } from "./git-summary.ts";
 import { activityView, type Drawing, type ViewState } from "./activity-view.ts";
 import { herdrRoute, watchQuestions, type AttentionTransport, type PeerQuestion } from "./attention.ts";
@@ -44,7 +45,7 @@ async function attach(tui: TUI, address: string, signal: AbortSignal) {
     });
   } finally { if (!signal.aborted) { tui.start(); tui.requestRender(true); } }
 }
-export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDialog: (c: Component) => boolean, dependencies = { route: herdrRoute, check: checkTerminal, attach }) {
+export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDialog: (c: Component) => boolean, dependencies = { route: herdrRoute, check: checkTerminal, attach }, readQuota = readCodexQuota) {
   let owner: ExtensionContext | undefined, session = "", host: TUI | undefined;
   let view: ReturnType<typeof activityView> | undefined, watching: ReturnType<typeof watchQuestions> | undefined;
   let lifetime = new AbortController(), jumping = false;
@@ -52,9 +53,21 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   const owns = (ctx: ExtensionContext) => ctx.mode === "tui" && owner?.sessionManager === ctx.sessionManager && session === ctx.sessionManager.getSessionId();
   let stopGit: (() => void) | undefined;
   const clearGit = () => { stopGit?.(); stopGit = undefined; state.git = undefined; };
+  let quotaRequest: AbortController | undefined;
+  const clearQuota = () => { quotaRequest?.abort(); quotaRequest = undefined; state.quota = undefined; };
+  const loadQuota = () => {
+    const request = quotaRequest = new AbortController();
+    state.quota = {state:"loading"};
+    void readQuota(request.signal).then(q => {
+      if (request !== quotaRequest) return;
+      state.quota = q; host?.requestRender();
+    });
+  };
   const toggle = (keyboard = false) => {
     if (!view || !owner) return;
-    clearGit(); state.open = !state.open; view.refresh();
+    clearGit(); clearQuota(); state.open = !state.open;
+    if (state.open) loadQuota();
+    view.refresh();
     if (state.open && keyboard && state.tasks.length) view.focusList();
     if (state.open) stopGit = watchGit(owner.cwd, row => { state.git = row; host?.requestRender(); });
   };
@@ -74,7 +87,7 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   };
   const stopPeers = () => { const old = watching; watching = undefined; old?.close(); };
   const stop = () => {
-    lifetime.abort(); stopPeers(); clearGit(); view?.dispose();
+    lifetime.abort(); stopPeers(); clearGit(); clearQuota(); view?.dispose();
     owner?.ui.setWidget(widgetKey, undefined); owner = undefined; host = view = undefined;
     state.open = false; state.tasks = []; state.launched = 0; state.questions = []; jumping = false; session = "";
   };

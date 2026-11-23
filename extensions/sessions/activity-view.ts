@@ -2,9 +2,10 @@ import type { Component, HStack, OverlayHandle, TUI, TuiMouseEvent } from "@eare
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PeerQuestion } from "./attention.ts";
 
+import { quotaLines, type Quota } from "./codex-quota.ts";
 import type { GitSummary } from "./git-summary.ts";
 import type { TaskRow } from "../activity-events.ts";
-export interface ViewState { open: boolean; tasks: TaskRow[]; launched?: number; questions: PeerQuestion[]; git?: GitSummary }
+export interface ViewState { open: boolean; tasks: TaskRow[]; launched?: number; questions: PeerQuestion[]; git?: GitSummary; quota?: Quota }
 export interface ViewActions { toggle(): void; question(q: PeerQuestion): void; canOpen(q: PeerQuestion): boolean }
 export interface Drawing { HStack: typeof HStack; truncateToWidth(s: string, width: number): string; wrap?: (s: string, width: number) => string[]; matchesKey?: typeof import("@earendil-works/pi-tui").matchesKey }
 type Host = TUI & { mode?: string; layoutRoot?: Component; setLayoutRoot?(c: Component): void; getFocusedComponent?(): Component | null };
@@ -92,7 +93,8 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     const visible = paged(combined,size,page,n => { page=n; selected=state.tasks[Math.max(0,n*size-entries.length)]?.id; });
     const questionCount = Math.min(size,Math.max(0,entries.length-page*size));
     return [title, ...gitRow, ...visible.slice(0,questionCount), header, ...visible.slice(questionCount),
-      ...(!n && !taskLines.length ? [{text:"Sin tareas activas",role:"muted" as const}] : [])];
+      ...(!n && !taskLines.length ? [{text:"Sin tareas activas",role:"muted" as const}] : []),
+      ...(state.quota ? quotaLines(state.quota).map(text=>({text})) : [])];
   }
   function surface(rows: (width: number) => Line[], rail: boolean): Component {
     let painted: Line[] = [], pressed: string | undefined;

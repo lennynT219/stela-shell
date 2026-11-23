@@ -11,7 +11,7 @@ export default function fixtureProvider(pi: ExtensionAPI) {
   let calls = 0;
   pi.registerProvider("ss-fixture", {
     baseUrl: "http://127.0.0.1:1/not-used", apiKey: "local-test-not-a-credential", api: "ss-fixture-api",
-    models: [{ id: "deterministic", name: "Local test fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 2048 }],
+    models: [{ id: "deterministic", name: "Local test fixture", reasoning: process.env.SS_FIXTURE_REASONING === "1", input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 2048 }],
     streamSimple(model, context) {
       const stream = createAssistantMessageEventStream();
       queueMicrotask(() => {
