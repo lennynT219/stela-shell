@@ -2,6 +2,8 @@ import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEq
 import { envelope, exactKeys, identifier, newId, object, SESSION_CODES, SessionError, validateMessage, workEnvelope,
   type Envelope, type PeerInfo, type SessionCode, type WorkContext } from "./messages.ts";
 
+import { decodeQuestion, type Question } from "./attention.ts";
+
 // Worst-case JSON escaping of an 8 KiB message, then hex ciphertext, still fits.
 export const MAX_FRAME_BYTES = 128 * 1024;
 export const MAX_RECORD_BYTES = 4096;
@@ -12,10 +14,13 @@ export const MAX_CONNECTIONS = 8, MAX_OUTBOUND = 4;
 const HEX64 = /^[a-f0-9]{64}$/;
 export interface Presence extends PeerInfo { version: 1; pid: number; secret: string }
 interface Packet { version: 1; id: string; from: string; to: string; nonce: string; data: string; tag: string; proof: string }
-export interface Receipt { accepted: boolean; duplicate?: boolean; error?: string; code?: SessionCode }
-export type Payload = { kind: "ping" } | { kind: "message"; message: Envelope } |
+export interface Receipt { accepted: boolean; duplicate?: boolean; error?: string; code?: SessionCode; question?: Question | null }
+export type Payload = { kind: "ping" } | { kind: "ui_question" } | { kind: "message"; message: Envelope } |
   { kind: "work_support"; version: 1 } | { kind: "work_message"; version: 1; work: WorkContext; message: Envelope };
-export type ResponseKind = "work_support" | "work_message";
+export type ResponseKind = "work_support" | "work_message" | "ui_question";
+export function responseKind(payload: Payload): ResponseKind | undefined {
+  return payload.kind === "ping" || payload.kind === "message" ? undefined : payload.kind;
+}
 export type Request = (payload: Payload) => Promise<Receipt>;
 
 const sign = (key: string, value: unknown) => createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify(value)).digest("hex");
@@ -54,6 +59,7 @@ export function unseal(value: Packet, own: Presence): Payload {
     const plain = envelope(data.message), message = workEnvelope({ ...plain, work: data.work });
     return { kind: "work_message", version: 1, message: plain, work: message.work! };
   }
+  if (data.kind === "ui_question") { exactKeys(data, ["kind"]); return { kind: "ui_question" }; }
   exactKeys(data, data.kind === "ping" ? ["kind"] : ["kind", "message"]);
   if (data.kind === "ping") return { kind: "ping" };
   if (data.kind !== "message") throw new Error("Invalid request kind.");
@@ -104,9 +110,11 @@ export type Receive = (from: PeerInfo, message: Envelope) => "accepted" | "dupli
 export interface SessionTransport {
   readonly info: PeerInfo;
   readonly profile: string;
+  readQuestion?: () => Question | null;
+  questionFor?(id: string, signal?: AbortSignal): Promise<(Question & { name: string }) | null>;
   update(name: string): void | Promise<void>;
   list(signal?: AbortSignal): Promise<PeerInfo[]>;
-  send(to: string, message: Envelope, signal?: AbortSignal): Promise<Receipt>;
+  send(to: string, message: Envelope, signal?: AbortSignal, displayPeer?: (name: string) => void): Promise<Receipt>;
   close(): Promise<void>;
 }
 export type OpenTransport = (profile: string, info: Omit<PeerInfo, "id">, receive: Receive, signal?: AbortSignal) => Promise<SessionTransport>;
@@ -120,12 +128,16 @@ export function decode(bytes: Buffer): unknown {
   if (bytes.length > MAX_FRAME_BYTES || bytes.indexOf(10) !== bytes.length - 1) throw new Error("Invalid transport frame.");
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, -1)));
 }
-export async function answer(raw: unknown, own: Presence, lookup: (id: string) => Presence | Promise<Presence>, receive: Receive, peerPid?: number): Promise<Buffer> {
+export async function answer(raw: unknown, own: Presence, lookup: (id: string) => Presence | Promise<Presence>, receive: Receive, peerPid?: number, question?: () => Question | null): Promise<Buffer> {
   const request = packet(raw);
   if (request.to !== own.id) throw new Error("Wrong activation.");
   const payload = unseal(request, own), sender = await lookup(request.from);
   if ((peerPid !== undefined && sender.pid !== peerPid) || !matches(request.proof, sign(sender.secret, unsigned(request)))) throw new Error("Sender authentication failed.");
   const routing = { id: request.id, from: own.id, to: request.from };
+  if (payload.kind === "ui_question") {
+    const fields = { version: 2, ...routing, kind: "ui_question", question: decodeQuestion(question?.() ?? null) };
+    return encode({ ...fields, proof: sign(own.secret, fields) });
+  }
   if (payload.kind === "work_support") {
     const response = { version: 2, ...routing, kind: "work_support", workVersion: 1, supported: true };
     return encode({ ...response, proof: sign(own.secret, response) });
@@ -147,11 +159,12 @@ export async function answer(raw: unknown, own: Presence, lookup: (id: string) =
 }
 export function receipt(raw: unknown, request: Packet, ownId: string, peer: Presence, kind?: ResponseKind): Receipt {
   const data = object(raw);
-  exactKeys(data, kind === "work_support" ? ["version", "id", "from", "to", "kind", "workVersion", "supported", "proof"] :
+  exactKeys(data, kind === "ui_question" ? ["version", "id", "from", "to", "kind", "question", "proof"] : kind === "work_support" ? ["version", "id", "from", "to", "kind", "workVersion", "supported", "proof"] :
     ["version", "id", "from", "to", "accepted", "duplicate", "error", "proof", ...(kind ? ["kind", "code"] : [])]);
   const { proof, ...response } = data;
   if (data.version !== (kind ? 2 : 1) || data.id !== request.id || data.from !== peer.id || data.to !== ownId ||
     (kind && data.kind !== kind) || !matches(proof, sign(peer.secret, response))) throw new Error("Invalid peer acknowledgment.");
+  if (kind === "ui_question") return { accepted: true, question: decodeQuestion(data.question) };
   if (kind === "work_support") {
     if (data.workVersion !== 1 || data.supported !== true) throw new Error("Unsupported work acknowledgment.");
     return { accepted: true };

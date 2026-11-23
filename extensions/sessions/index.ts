@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import { DEFAULT_WORK_SECONDS, formatMessage, Mailbox, MAX_HOPS, MAX_WORK_SECONDS, MIN_WORK_SECONDS, PEER_TASK_BOUNDARIES, PEER_TASK_POLICY, quoted, sendContext, SessionError, type Envelope, type PeerInfo, type Received, type WorkOptions } from "./messages.ts";
 import { PeerTransport } from "./transport.ts";
@@ -7,7 +7,7 @@ import { openPrimaryActivity, type ActivityOwner } from "../primary-activity.ts"
 
 export const MESSAGE_TYPE = "stela-peer-message";
 const WIDGET = "ss-sessions";
-interface Dependencies { profile: string; env?: NodeJS.ProcessEnv; open?: OpenTransport; text?: MakeText }
+interface Dependencies { profile: string; env?: NodeJS.ProcessEnv; open?: OpenTransport; text?: MakeText; incomingRenderer?: MessageRenderer; panel?: ReturnType<typeof import("./activity.ts").registerActivity> }
 const result = (text: string, details: unknown) => ({ content: [{ type: "text" as const, text }], details });
 function preview(value: string, bytes: number): string {
   let output = "", used = 2;
@@ -25,7 +25,8 @@ function discoveryInfo(peer: PeerInfo): PeerInfo {
 /** Startup and callable tools are both excluded for helpers; a tool guard alone is insufficient. */
 export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): void {
   if ((dependencies.env ?? process.env).STELA_SUBAGENT_CHILD) return;
-  if (dependencies.text) pi.registerMessageRenderer(MESSAGE_TYPE, messageRenderer("Mensaje", dependencies.text));
+  const incoming = dependencies.incomingRenderer ?? (dependencies.text && messageRenderer("Mensaje",dependencies.text));
+  if (incoming) pi.registerMessageRenderer(MESSAGE_TYPE,incoming);
   const open = dependencies.open ?? PeerTransport.open;
   let owner: ExtensionContext | undefined, ownerId: string | undefined, transport: SessionTransport | undefined;
   let mailbox = new Mailbox(), generation = 0, startup: AbortController | undefined;
@@ -36,7 +37,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
 
   const owns = (ctx: ExtensionContext) => owner?.sessionManager === ctx.sessionManager && ownerId === ctx.sessionManager.getSessionId();
   const widget = () => {
-    try { if (owner?.hasUI) owner.ui.setWidget(WIDGET, transport ? [`Sesiones · ${transport.info.id} · ${mailbox.pending} pendientes${paused ? " · pausado" : ""}`] : undefined); }
+    try { if (owner?.hasUI && !dependencies.panel?.active(owner)) owner.ui.setWidget(WIDGET, transport ? [`Sesiones · ${transport.info.id} · ${mailbox.pending} pendientes${paused ? " · pausado" : ""}`] : undefined); }
     catch { /* presentation cannot change admission or block resource cleanup */ }
   };
   const acknowledge = (ctx: ExtensionContext) => {
@@ -65,7 +66,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   };
   const draft = (received: Received) => ({
     customType: MESSAGE_TYPE, content: formatMessage(received), display: true,
-    details: { activation: transport!.info.id, messageId: received.message.id, from: received.from.id, thread: received.message.thread, hop: received.message.hop, replyTo: received.message.replyTo,
+    details: { activation: transport!.info.id, messageId: received.message.id, from: received.from.id, fromName: received.from.name, thread: received.message.thread, hop: received.message.hop, replyTo: received.message.replyTo,
       ...(received.message.work ? { work: received.message.work } : {}) },
   });
   const pump = (version = generation) => {
@@ -85,6 +86,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   };
   const stop = async () => {
     generation++; startup?.abort(); startup = undefined;
+    try { dependencies.panel?.unbind(); } catch { /* the monitor cannot prevent transport teardown */ }
     activity?.close(); activity = undefined;
     const old = transport; transport = undefined;
     try { if (owner?.hasUI) owner.ui.setWidget(WIDGET, undefined); } catch { /* teardown must continue */ }
@@ -113,6 +115,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
           (candidate: ActivityOwner) => acknowledge(candidate as ExtensionContext));
       } catch (error) { await fresh.close(); throw error; }
       transport = fresh; unavailable = ""; widget();
+      try { dependencies.panel?.bind(ctx, fresh); } catch { /* messaging remains available without the monitor */ }
     } catch (error) {
       if (generation !== version) return;
       unavailable = error instanceof Error ? error.message : "Local messaging startup failed.";
@@ -205,10 +208,13 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
       if (paused) throw new Error("Messaging is paused after interruption/injection failure; human input or /ss-sessions on is required.");
       const { to, text, reply_to, work } = params as { to: string; text: string; reply_to?: string; work?: WorkOptions };
       if (to === current.info.id) throw new Error("Cannot message this activation itself.");
-      let message: Envelope | undefined;
+      let message: Envelope | undefined, peerName: string | undefined;
       try {
         message = mailbox.prepare(to, text, reply_to, work);
-        const receipt = await current.send(to, message, signal);
+        const receipt = await current.send(to, message, signal, name => {
+          peerName = name;
+          if (ctx.mode === "tui") _update?.({ content: [], details: { peerName } });
+        });
         if (version !== generation || transport !== current || !owns(ctx)) throw new SessionError("DELIVERY_UNCONFIRMED", "Session changed; message delivery is unconfirmed. Do not retry automatically.");
         if (!receipt.accepted) {
           if (receipt.code) throw new SessionError(receipt.code, receipt.error ?? "Recipient rejected the message.");
@@ -216,11 +222,11 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
         }
         const context = sendContext(message, reply_to !== undefined ? "reply_to" : message.hop === 0 ? "root" : "implicit");
         return result(`Accepted for delivery: ${message.id} to ${to}. Thread: ${message.thread}; hop: ${message.hop + 1}/${MAX_HOPS}; message expiry (Unix ms): ${message.expiresAt}${message.work ? `; fixed work deadline: ${message.work.deadline}` : ""}. Not a read/completion receipt. Replies arrive automatically; continue independent work or honestly report a pending reply.`,
-          { messageId: message.id, to, ...context, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false });
+          { messageId: message.id, to, ...(peerName !== undefined ? { peerName } : {}), ...context, replyTo: message.replyTo, status: "accepted", duplicate: receipt.duplicate ?? false });
       } catch (error) {
         if (!(error instanceof SessionError)) throw error;
         const context = error.context ?? (message ? sendContext(message, reply_to !== undefined ? "reply_to" : message.hop === 0 ? "root" : "implicit") : undefined);
-        return { ...result(error.message, { code: error.code, status: "error", stage: message ? "transport" : "admission", ...(context ? { context } : {}) }), isError: true };
+        return { ...result(error.message, { code: error.code, status: "error", ...(peerName !== undefined ? { peerName } : {}), stage: message ? "transport" : "admission", ...(context ? { context } : {}) }), isError: true };
       }
     },
   });
@@ -239,7 +245,12 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
 
 export default async function sessions(pi: ExtensionAPI): Promise<void> {
   if (process.env.STELA_SUBAGENT_CHILD) return;
-  const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
-  const { Text } = await import("@earendil-works/pi-tui");
-  registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0) });
+  const { getAgentDir, ExtensionSelectorComponent, ExtensionInputComponent, ExtensionEditorComponent, highlightCode, getLanguageFromPath } = await import("@earendil-works/pi-coding-agent");
+  const drawing = await import("@earendil-works/pi-tui");
+  const { HStack, Text, truncateToWidth } = drawing;
+  const { registerBlocks, familyMessage } = await import("../blocks/index.ts");
+  registerBlocks(pi,{ ...drawing, highlightCode, getLanguageFromPath });
+  const { registerActivity } = await import("./activity.ts");
+  registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0), incomingRenderer: familyMessage("sessions",drawing), panel: registerActivity(pi, { HStack, truncateToWidth },
+    c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent) });
 }

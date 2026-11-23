@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
+import { activeState, REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { TaskQueue, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, executionTimeoutSeconds, concurrencyLimit, validateAssignment, type Task } from "./tasks.ts";
 import {
   BLOCKED_ENTRY, CHILD_MARKER, CHILD_SCOPE, READY_ENTRY, READ_TOOLS,
@@ -99,6 +100,7 @@ interface Dependencies {
   launch?: typeof resolveLaunch;
   env?: NodeJS.ProcessEnv;
   text?: MakeText;
+  incomingRenderer?: MessageRenderer;
 }
 
 /** Dependency seams keep lifecycle tests local and model-free. */
@@ -107,17 +109,27 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
   if (env[CHILD_MARKER] === "1") { registerChildGuard(pi, env[CHILD_SCOPE]); return; }
   const helper = readFileSync(new URL("./assets/helper.md", import.meta.url), "utf8").trim();
   if (!helper) throw new Error("ss-helper instructions are empty.");
-  if (dependencies.text) pi.registerMessageRenderer(RESULT_TYPE, messageRenderer("Ayudante", dependencies.text));
+  const incoming = dependencies.incomingRenderer ?? (dependencies.text && messageRenderer("Ayudante",dependencies.text));
+  if (incoming) pi.registerMessageRenderer(RESULT_TYPE,incoming);
   const execute = dependencies.run ?? runChild;
   const launch = dependencies.launch ?? resolveLaunch;
   let queue: TaskQueue | undefined;
   let owner: ExtensionContext | undefined;
   let generation = 0;
 
+  let legacyWidget = false;
   const updateWidget = () => {
     if (!owner?.hasUI || !queue) return;
     const tasks = queue.list();
     const relevant = tasks.filter((task) => !task.delivered).slice(0, 8);
+    if (owner.mode === "tui" && pi.events) {
+      let claimed = false;
+      pi.events.emit(TASKS_EVENT, { manager: owner.sessionManager, id: owner.sessionManager.getSessionId(),
+        tasks: relevant.flatMap(t => activeState(t.state) ? [{ label: t.assignment.label, state: t.state }] : []),
+        claim() { claimed = true; } } satisfies TaskSignal);
+      if (claimed) { if (legacyWidget) owner.ui.setWidget(WIDGET, undefined); legacyWidget = false; return; }
+    }
+    legacyWidget = relevant.length > 0;
     owner.ui.setWidget(WIDGET, relevant.length ? relevant.map((task) => `Ayudante · ${task.assignment.label} · ${task.state}`) : undefined);
   };
   const owns = (ctx: ExtensionContext) => owner?.sessionManager === ctx.sessionManager && owner?.sessionManager.getSessionId() === ctx.sessionManager.getSessionId();
@@ -139,6 +151,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     queue = undefined;
     await old?.cancelAll(true);
   };
+  pi.events?.on(REQUEST_TASKS, updateWidget);
   const requireQueue = (ctx: ExtensionContext) => {
     if (!queue || !owns(ctx)) throw new Error("No active StelaShell task queue for this session.");
     return queue;
@@ -170,7 +183,9 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     const next = [...entries, ...ready.map((task) => ({
       type: "custom_message" as const, customType: RESULT_TYPE, content: formatResult(task), display: true,
       // Raw diagnostics and tool traces stay in bounded memory for human inspection.
-      details: { taskId: task.id, label: task.assignment.label, state: task.state, truncated: task.result?.truncated },
+      details: { taskId: task.id, label: task.assignment.label, state: task.state, truncated: task.result?.truncated,
+        ...(task.sourcesMayHaveChanged ? { sourcesMayHaveChanged: true } : {}), ...(task.result && partialEvidenceWarning(task.result) ? { partialEvidence: true } : {}),
+        ...(task.result && !task.result.output.trim() ? { noAnswer: true } : {}) },
     }))];
     // A proposal is not a committed delivery: acknowledge only after Pi records it.
     return { entries: next, continue: true };
@@ -248,7 +263,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
       const task = current.get(task_id);
       if (!task) throw new Error("Unknown task in this session.");
       const requested = current.cancel(task_id);
-      return { content: [{ type: "text", text: `${task_id}: ${requested ? "cancellation requested" : task.state}.` }], details: { taskId: task_id, requested } };
+      return { content: [{ type: "text", text: `${task_id}: ${requested ? "cancellation requested" : task.state}.` }], details: { taskId: task_id, requested, label: task.assignment.label, state: task.state } };
     },
   });
 
@@ -274,6 +289,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
 
 export default async function subagents(pi: ExtensionAPI): Promise<void> {
   if (process.env[CHILD_MARKER] === "1") { registerSubagents(pi); return; }
-  const { Text } = await import("@earendil-works/pi-tui");
-  registerSubagents(pi, { text: (content) => new Text(content, 0, 0) });
+  const drawing = await import("@earendil-works/pi-tui");
+  const { familyMessage } = await import("../blocks/index.ts");
+  registerSubagents(pi, { text: (content) => new drawing.Text(content, 0, 0), incomingRenderer: familyMessage("tasks",drawing) });
 }

@@ -3,8 +3,9 @@ import { randomBytes } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Question } from "./attention.ts";
 import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
-import { answer, boundedString, decode, encode, MAX_PEERS, IO_DEADLINE_MS, presence, publicPeer, receipt, seal, sendBounded,
+import { answer, boundedString, decode, encode, MAX_PEERS, IO_DEADLINE_MS, presence, publicPeer, receipt, responseKind, seal, sendBounded,
   type Payload, type Presence, type Receive, type Receipt, type SessionTransport } from "./protocol.ts";
 
 export const WINDOWS_SESSIONS_HELPER = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../../native/windows-sessions/target/release/stela-sessions.exe");
@@ -131,6 +132,7 @@ export class NativeBridge {
 export class WindowsTransport implements SessionTransport {
   readonly info: PeerInfo;
   readonly profile: string;
+  readQuestion?: () => Question | null;
   private closed = false;
   private active = new Set<number>();
   private bridge: NativeBridge;
@@ -143,7 +145,7 @@ export class WindowsTransport implements SessionTransport {
       this.active.add(connection);
       void Promise.resolve().then(() => answer(decode(bytes), own, (id) => this.readPresence(id), (from, message) => {
         if (this.closed) throw new Error("Activation closed."); return receive(from, message);
-      }, pid)).then((bytes) => bridge.respond(connection, bytes), () => bridge.respond(connection)).finally(() => this.active.delete(connection));
+      }, pid, () => this.readQuestion?.() ?? null)).then((bytes) => bridge.respond(connection, bytes), () => bridge.respond(connection)).finally(() => this.active.delete(connection));
     };
   }
   static async open(profile: string, info: Omit<PeerInfo, "id">, receive: Receive, signal?: AbortSignal, helper?: string): Promise<WindowsTransport> {
@@ -171,14 +173,22 @@ export class WindowsTransport implements SessionTransport {
     const request = seal(this.own, peer, payload);
     const result = await this.bridge.call(5, [Buffer.from(peer.id),integer(peer.pid),encode(request)],signal,IO_DEADLINE_MS);
     if (result.length !== 1) throw new Error("Invalid native wire result.");
-    return receipt(decode(result[0]), request, this.own.id, peer, payload.kind === "work_support" || payload.kind === "work_message" ? payload.kind : undefined);
+    return receipt(decode(result[0]), request, this.own.id, peer, responseKind(payload));
   }
-  async send(to: string, message: Envelope, signal?: AbortSignal): Promise<Receipt> {
+  async send(to: string, message: Envelope, signal?: AbortSignal, displayPeer?: (name: string) => void): Promise<Receipt> {
     if (to === this.own.id) throw new Error("Cannot message this activation itself.");
     return sendBounded(message, signal, async (scoped) => {
       const peer = await this.readPresence(identifier(to), scoped);
+      try { displayPeer?.(peer.name); } catch { /* presentation cannot affect an exact-ID send */ }
       return (payload) => this.request(peer, payload, scoped);
     });
+  }
+  async questionFor(id: string, signal?: AbortSignal): Promise<(Question & { name: string }) | null> {
+    const peer = await this.readPresence(identifier(id), signal);
+    const { question } = await this.request(peer, { kind: "ui_question" }, signal);
+    // The native bridge owns the IPC PID on Windows; there is no Herdr route here.
+    if (!question) return null;
+    return { ...question, name: peer.name, route: null };
   }
   async list(signal?: AbortSignal): Promise<PeerInfo[]> {
     signal?.throwIfAborted(); if (this.closed) throw new Error("Session transport closed.");

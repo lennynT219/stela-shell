@@ -2,9 +2,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
+import type { Question } from "./attention.ts";
 import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
 import { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS, MAX_CONNECTIONS, MAX_OUTBOUND,
-  answer, boundedString, encode, presence, publicPeer, receipt, seal, sendBounded, type Payload, type Presence, type Receipt, type SessionTransport } from "./protocol.ts";
+  answer, boundedString, encode, presence, publicPeer, receipt, responseKind, seal, sendBounded, type Payload, type Presence, type Receipt, type SessionTransport } from "./protocol.ts";
 export { MAX_FRAME_BYTES, MAX_RECORD_BYTES, MAX_SCAN_ENTRIES, MAX_PEERS, IO_DEADLINE_MS } from "./protocol.ts";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
 /** Exactly one bounded JSON line. Absolute deadlines also cover clients that send no bytes. */
@@ -50,6 +51,7 @@ export function endpointName(profile: string, id: string, platform: NodeJS.Platf
 export class PeerTransport {
   readonly info: PeerInfo;
   readonly profile: string;
+  readQuestion?: () => Question | null;
   private readonly root: string;
   private readonly endpoint: string;
   private readonly own: Presence;
@@ -148,7 +150,7 @@ export class PeerTransport {
       void answer(raw, this.own, (id) => this.readPresence(id), (from, message) => {
         if (this.closed) throw new Error("Session closed.");
         return this.onMessage(from, message);
-      }).then((bytes) => { if (!this.closed && !socket.destroyed) socket.end(bytes); else socket.destroy(); }, () => socket.destroy());
+      }, undefined, () => this.readQuestion?.() ?? null).then((bytes) => { if (!this.closed && !socket.destroyed) socket.end(bytes); else socket.destroy(); }, () => socket.destroy());
     }, () => socket.destroy());
   }
   private async request(peer: Presence, payload: Payload, signal?: AbortSignal): Promise<Receipt> {
@@ -175,16 +177,24 @@ export class PeerTransport {
       socket.on("error", () => finish(new Error("Peer unavailable; delivery unconfirmed. Do not automatically retry.")));
       socket.once("close", () => finish(new Error("Peer disconnected; delivery unconfirmed. Do not automatically retry.")));
       readFrame(socket, (raw) => {
-        finish(undefined, receipt(raw, request, this.own.id, peer, payload.kind === "work_support" || payload.kind === "work_message" ? payload.kind : undefined));
+        finish(undefined, receipt(raw, request, this.own.id, peer, responseKind(payload)));
       }, () => finish(new Error("Invalid peer acknowledgment; delivery unconfirmed. Do not automatically retry.")));
     });
   }
-  async send(to: string, message: Envelope, signal?: AbortSignal): Promise<Receipt> {
+  async send(to: string, message: Envelope, signal?: AbortSignal, displayPeer?: (name: string) => void): Promise<Receipt> {
     if (to === this.own.id) throw new Error("Cannot message this activation itself.");
     return sendBounded(message, signal, async (scoped) => {
       const peer = this.readPresence(identifier(to));
+      try { displayPeer?.(peer.name); } catch { /* presentation cannot affect an exact-ID send */ }
       return (payload) => this.request(peer, payload, scoped);
     });
+  }
+  async questionFor(id: string, signal?: AbortSignal): Promise<(Question & { name: string }) | null> {
+    const peer = this.readPresence(identifier(id));
+    const { question } = await this.request(peer, { kind: "ui_question" }, signal);
+    // Bind the destination to the authenticated Pi process, not just a terminal name.
+    if (!question) return null;
+    return { ...question, name: peer.name, route: question.route?.pid === peer.pid ? question.route : null };
   }
   async list(signal?: AbortSignal): Promise<PeerInfo[]> {
     if (this.closed) throw new Error("Session transport is closed.");
