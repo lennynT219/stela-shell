@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { TaskRow } from "../activity-events.ts";
 import type { RunResult } from "./runner.ts";
 
 export interface Assignment {
@@ -73,7 +74,8 @@ interface Entry {
   task: Task;
   key: string;
   controller: AbortController;
-  execute: (signal: AbortSignal) => Promise<RunResult>;
+  lastAction?: string;
+  execute: (signal: AbortSignal, report: (action: string) => void) => Promise<RunResult>;
 }
 
 /** In-memory, session-owned queue. It never restores or relaunches old work. */
@@ -82,6 +84,12 @@ export class TaskQueue {
   private live = new Set<string>();
   private waiters = new Set<() => void>();
   private closed = false;
+  private admissions = 0;
+  get admitted(): number { return this.admissions; }
+  activityRows(): TaskRow[] {
+    return Array.from(this.entries.values(), ({task, lastAction}) => ({id: task.id, label: task.assignment.label,
+      objective: task.assignment.objective, state: task.state, lastAction}));
+  }
   private concurrency: number;
   private onChange: () => void;
 
@@ -113,6 +121,7 @@ export class TaskQueue {
       if (entry.task.delivered) this.entries.delete(id);
     }
     const task: Task = { id: `task-${randomUUID()}`, assignment: structuredClone(assignment), state: "queued", delivered: false, sourcesMayHaveChanged: false };
+    this.admissions++;
     this.entries.set(task.id, { task, key, controller: new AbortController(), execute });
     // Admission is synchronous; execution starts after the tool can return its task ID.
     queueMicrotask(() => this.pump());
@@ -187,7 +196,10 @@ export class TaskQueue {
       entry.task.state = "running";
       this.live.add(entry.task.id);
       this.changed();
-      void Promise.resolve().then(() => entry.execute(entry.controller.signal)).catch((error): RunResult => ({
+      void Promise.resolve().then(() => entry.execute(entry.controller.signal, action => {
+        if (entry.task.state !== "running" || entry.lastAction === action) return;
+        entry.lastAction = action; this.changed();
+      })).catch((error): RunResult => ({
         status: "failed", output: "", error: error instanceof Error ? error.message : "Child execution failed.", diagnostics: "", trace: [], truncated: false,
       })).then((result) => {
         if (entry.controller.signal.aborted) result = { ...result, status: "cancelled", error: "Cancelled; any output is partial." };

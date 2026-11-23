@@ -52,9 +52,10 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   const owns = (ctx: ExtensionContext) => ctx.mode === "tui" && owner?.sessionManager === ctx.sessionManager && session === ctx.sessionManager.getSessionId();
   let stopGit: (() => void) | undefined;
   const clearGit = () => { stopGit?.(); stopGit = undefined; state.git = undefined; };
-  const toggle = () => {
+  const toggle = (keyboard = false) => {
     if (!view || !owner) return;
     clearGit(); state.open = !state.open; view.refresh();
+    if (state.open && keyboard && state.tasks.length) view.focusList();
     if (state.open) stopGit = watchGit(owner.cwd, row => { state.git = row; host?.requestRender(); });
   };
   let displayRoute: ReturnType<typeof herdrRoute> = null;
@@ -75,7 +76,7 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   const stop = () => {
     lifetime.abort(); stopPeers(); clearGit(); view?.dispose();
     owner?.ui.setWidget(widgetKey, undefined); owner = undefined; host = view = undefined;
-    state.open = false; state.tasks = []; state.questions = []; jumping = false; session = "";
+    state.open = false; state.tasks = []; state.launched = 0; state.questions = []; jumping = false; session = "";
   };
   const start = (_event: unknown, ctx: ExtensionContext) => {
     stop(); if (ctx.mode !== "tui") return;
@@ -91,12 +92,17 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   pi.events.on(TASKS_EVENT, (data: unknown) => {
     const e = data as TaskSignal;
     if (!e || !owner || e.manager !== owner.sessionManager || e.id !== session || !Array.isArray(e.tasks) || typeof e.claim !== "function") return;
-    state.tasks = e.tasks.filter(t => t && typeof t.label === "string" && activeState(t.state)).slice(0, 8);
+    if (!Number.isSafeInteger(e.launched) || e.launched < 0) return;
+    const rows = e.tasks.filter(t => t && typeof t.id === "string" && typeof t.label === "string" && typeof t.objective === "string" &&
+      (t.lastAction === undefined || typeof t.lastAction === "string") && (activeState(t.state) || ["completed","failed","cancelled"].includes(t.state)));
+    state.launched = e.launched;
+    state.tasks = rows.filter(t => activeState(t.state)).slice(0, 8);
+    view?.updateDetail(rows);
     e.claim(); view?.refresh();
   });
   pi.on("session_start", start); pi.on("session_tree", start); pi.on("session_shutdown", stop);
   pi.registerCommand("ss-activity", { description: "Abrir o cerrar el Panel de Git, actividad y preguntas.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
-  pi.registerShortcut("alt+a", { description: "Abrir/cerrar actividad", handler: async ctx => { if (owns(ctx)) toggle(); } });
+  pi.registerShortcut("alt+a", { description: "Abrir/cerrar actividad", handler: async ctx => { if (owns(ctx)) toggle(true); } });
   pi.registerShortcut("alt+j", { description: "Ver la pregunta pendiente en la sesión de origen", handler: async ctx => { if (owns(ctx)) await question(state.questions[0]); } });
   return {
     toggle,

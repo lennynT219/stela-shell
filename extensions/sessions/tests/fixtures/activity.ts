@@ -6,14 +6,18 @@ import type { RunResult } from "../../../subagents/runner.ts";
 
 export default function fixture(pi: ExtensionAPI) {
   let screen: any, delegate: any, pending: ((value: RunResult) => void)[] = [], serial = 0;
+  const reports: ((action:string) => void)[] = [];
+  const finish = () => { for (const done of pending.splice(0)) done({status:"completed",output:"fixture evidence",error:"",diagnostics:"",trace:[],truncated:false}); reports.length=0; };
   const out = `${process.env.SS_FIXTURE_SCREEN}`;
   registerSubagents(new Proxy(pi, { get(target, key) {
     if (key === "registerTool") return (tool: any) => { if (tool.name === "ss_tasks_delegate") delegate = tool; return pi.registerTool(tool); };
     return Reflect.get(target, key);
-  } }), { run: ({ signal }) => new Promise(resolve => { pending.push(resolve); signal.addEventListener("abort", () => resolve({ status: "cancelled", output: "", error: "", diagnostics: "", trace: [], truncated: false }), { once: true }); }) });
+  } }), process.env.SS_FIXTURE_REAL_CHILD ? {} : { run: ({ signal,onAction }) => new Promise(resolve => { if(onAction) reports.push(onAction); pending.push(resolve); signal.addEventListener("abort", () => resolve({ status: "cancelled", output: "", error: "", diagnostics: "", trace: [], truncated: false }), { once: true }); }) });
   pi.on("session_start", (_e, ctx) => {
     ctx.ui.setWidget("fixture-screen", (tui) => { screen = tui; return { render: () => [], invalidate() {} }; });
     ctx.ui.onTerminalInput(data => {
+      if (process.env.SS_TEST_TASK_DETAIL && data === "\x1bOS") { reports.forEach((report,i)=>report(`Leer · fuente-${i+1}.ts`)); return {consume:true}; }
+      if (process.env.SS_TEST_TASK_DETAIL && data === "\x1b[17~") { finish(); return {consume:true}; }
       if (process.env.SS_TEST_PANEL_DIALOG && screen?.isOverlayFocused() && data === "\x1b[21~") {
         void ask(ctx); return {consume:true};
       }
@@ -30,7 +34,7 @@ export default function fixture(pi: ExtensionAPI) {
     const n = ++serial;
     await delegate.execute("fixture", { label: `Revisión ${n}`, objective: `Fixture ${n}`, references: ["sample.txt"], done_when: "done" }, undefined, undefined, ctx);
   } });
-  pi.registerShortcut("f6", { description: "Complete tasks", handler: async () => { for (const done of pending.splice(0)) done({ status: "completed", output: "fixture evidence", error: "", diagnostics: "", trace: [], truncated: false }); } });
+  pi.registerShortcut("f6", { description: "Complete tasks", handler: async () => finish() });
   const ask = async (ctx: ExtensionContext) => {
     const yes = await ctx.ui.confirm("Pregunta de prueba", "¿Conservar el borrador sintético?");
     writeFileSync(out + ".answer", JSON.stringify(yes));

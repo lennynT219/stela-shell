@@ -26,6 +26,7 @@ export interface RunOptions {
   trusted: boolean;
   signal: AbortSignal;
   env?: NodeJS.ProcessEnv;
+  onAction?: (action: string) => void;
   /** Internal test seam: may shorten, never extend, the assignment's hard budget. */
   timeoutMs?: number;
   killGraceMs?: number;
@@ -244,6 +245,12 @@ export async function runChild(options: RunOptions): Promise<RunResult> {
       if (event.type === "tool_execution_start") {
         if (!options.scope.tools.includes(event.toolName)) { stop("Unexpected child tool execution."); return; }
         const detail = typeof event.args?.path === "string" ? ` ${event.args.path}` : "";
+        if (ready && options.onAction) {
+          const verb = ({read:"Leer", ls:"Listar", find:"Buscar archivos", grep:"Buscar texto"} as Record<string,string>)[event.toolName];
+          // Display only the reader name and basename, never command arguments, search expressions or output.
+          const leaf = typeof event.args?.path === "string" ? basename(event.args.path) : "";
+          try { options.onAction(boundedText(`${verb}${leaf ? ` · ${leaf}` : ""}`, 220)); } catch { /* Display is optional. */ }
+        }
         const ranges = event.toolName === "read" ? ["offset", "limit"]
           .filter((key) => Number.isSafeInteger(event.args?.[key]))
           .map((key) => ` ${key}=${event.args[key]}`).join("") : "";

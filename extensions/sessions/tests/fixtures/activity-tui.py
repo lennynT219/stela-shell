@@ -28,7 +28,7 @@ else:
 ''')
     hc.chmod(0o700)
     env = {'PATH': str(root/'bin') + ':' + os.environ['PATH'], 'HOME': str(root), 'TERM': 'xterm-256color',
-           'TMPDIR': str(root), 'PI_OFFLINE': '1', 'NO_UPDATE_NOTIFIER': '1',
+           'SS_TEST_TASK_DETAIL':'1', 'TMPDIR': str(root), 'PI_OFFLINE': '1', 'NO_UPDATE_NOTIFIER': '1',
            'PI_CODING_AGENT_DIR': str(profile), 'HC_TERMINAL_SOCKET': str(root/'core.sock')}
     children = []
     try:
@@ -45,21 +45,38 @@ else:
         left.click(lines, 'Ver actividad')
         left.wait(lambda l, d: any(s.find('Panel ·') >= 100 for s in l) and has(l, 'Revisión 2') and d == DRAFT,
                   'clicked notice opens a real right column, preserving focus and draft')
+        lines=left.wait(lambda l,d:has(l,'Subagentes · 2 lanzados'),'two admitted')
+        left.click(lines,'Revisión 1')
+        left.wait(lambda l,d:has(l,'Objetivo: Fixture 1') and has(l,'Última acción: Sin acción') and has(l,'observada'),'inspect clicked identity')
+        left.key(b'\x1bOS')
+        left.wait(lambda l,d:has(l,'fuente-1.ts') and not has(l,'fuente-2.ts') and d==DRAFT,'live last action')
+        left.key(b'\x1b'); left.wait(lambda l,d:has(l,'Revisión 2') and not has(l,'Objetivo:'),'back to list')
+        left.key(b'\x1b[B'); left.key(b'\r')
+        left.wait(lambda l,d:has(l,'Objetivo: Fixture 2') and has(l,'fuente-2.ts'),'arrows and enter select another task')
         left.key(F6)
-        left.wait(lambda l, d: has(l, 'Sin tareas activas') and not has(l, 'Revisión 2'), 'open empty state')
+        lines=left.wait(lambda l,d:has(l,'Terminada') and has(l,'Fixture 2') and d==DRAFT,'selected task finishes in place')
+        left.click(lines,'Volver')
+        left.wait(lambda l,d:has(l,'Subagentes · 2 lanzados') and not has(l,'Revisión 2'), 'only counter remains')
         left.size(64)
-        left.wait(lambda l, d: any(0 <= s.find('Sin tareas activas') < 8 for s in l) and d == DRAFT, 'narrow on resize')
+        left.wait(lambda l,d:any(0 <= s.find('Subagentes · 2 lanzados') < 8 for s in l) and d==DRAFT,'narrow on resize')
         left.size(112)
         left.wait(lambda l, d: any(s.find('Panel ·') >= 76 for s in l) and d == DRAFT, 'dock at 112 columns')
         left.size(111)
-        lines = left.wait(lambda l, d: any(0 <= s.find('Sin tareas activas') < 8 for s in l), 'fold at 111 columns')
+        lines = left.wait(lambda l, d: any(0 <= s.find('Subagentes · 2 lanzados') < 8 for s in l), 'fold at 111 columns')
         left.click(lines, 'Cerrar')
-        left.wait(lambda l, d: not has(l, 'Sin tareas activas') and d == DRAFT, 'close narrow list by click')
+        left.wait(lambda l, d: not has(l, 'Subagentes ·') and d == DRAFT, 'close narrow list by click')
         left.size(64)
         left.key(TOGGLE)
-        left.wait(lambda l, d: has(l, 'Sin tareas activas') and not has(l, 'borrador sin enviar') and d==DRAFT, 'sheet covers chat without losing the draft')
+        left.wait(lambda l, d: has(l, 'Subagentes · 2 lanzados') and not has(l, 'borrador sin enviar') and d==DRAFT, 'sheet covers chat without losing the draft')
         left.key(b'\x1b'); left.wait(lambda l,d: d==DRAFT and has(l,'borrador sin enviar') and not has(l,'Sin tareas activas'), 'Esc restores editor'); left.key(F5)
         left.wait(lambda l, d: has(l, '1 tarea en curso') and not has(l, 'Cerrar'), 'closed while task runs')
+        left.size(146); left.wait(lambda l,d:has(l,'Ver actividad') and any(len(s)>112 for s in l),'wide before shortcut')
+        left.key(TOGGLE); left.wait(lambda l,d:has(l,'› ') and has(l,'Revisión 3'),'keyboard focuses wide list')
+        left.key(b'\r'); left.wait(lambda l,d:has(l,'Objetivo: Fixture 3') and d==DRAFT,'keyboard opens exact detail')
+        left.size(38); left.wait(lambda l,d:has(l,'Objetivo: Fixture 3') and not has(l,'borrador sin enviar'),'same detail after resize')
+        left.key(b'\x1b'); left.wait(lambda l,d:has(l,'Subagentes · 3 lanzados') and not has(l,'Objetivo:'),'Esc to narrow list')
+        left.key(b'\r'); left.wait(lambda l,d:has(l,'Objetivo: Fixture 3') and d==DRAFT,'narrow keyboard inspection')
+        left.key(TOGGLE); left.size(64); left.wait(lambda l,d:not has(l,'Objetivo:') and has(l,'Ver actividad'),'back to editor')
         left.key(F6)
         left.wait(lambda l, d: not has(l, 'Ver actividad') and not has(l, 'Sin tareas activas'), 'last task ended while closed')
 

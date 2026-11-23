@@ -197,6 +197,25 @@ test("admission propagates budgets and an active duplicate cannot extend or rest
   await h.emit("session_shutdown");
 });
 
+test("panel counts admissions once across queue updates and restores only the selected branch without restarting work", async () => {
+  const h=harness(); let latest:any, runs=0;
+  h.pi.events={on() {}, emit(_name:string,e:any) { latest=e; e.claim(); }};
+  h.pi.appendEntry=(customType:string,data:any)=>h.branch.push({type:"custom",customType,data});
+  const gate=deferred<RunResult>(); h.flags.set("ss-tasks-concurrency","1");
+  registerSubagents(h.pi,{env:{},launch:fakeLaunch,run:async opts=>{ runs++; opts.onAction?.("Leer · ejemplo"); return gate.promise; }});
+  h.flags.set("ss-tasks-concurrency","1"); await h.emit("session_start");
+  const tool=h.tools.get("ss_tasks_delegate"), admit=(obj:any)=>tool.execute("call",obj,undefined,undefined,h.ctx);
+  const first=await admit(assignment); await admit(assignment); await assert.rejects(admit({...assignment,label:""}));
+  const second=await admit({...assignment,objective:"other"}); await tick();
+  assert.equal(latest.launched,2); assert.deepEqual(latest.tasks.map((t:any)=>[t.state,t.lastAction]),[["running","Leer · ejemplo"],["queued",undefined]]);
+  await h.tools.get("ss_tasks_cancel").execute("x",{task_id:second.details.taskId},undefined,undefined,h.ctx);
+  gate.resolve(success); await tick(); assert.equal(latest.tasks[1].state,"cancelled"); assert.equal(latest.launched,2);
+  assert.deepEqual(h.branch.map(e=>Object.keys(e.data)),[["taskId"],["taskId"]]);
+  h.branch.push({type:"custom_message",customType:"stela-subagent-result",details:{taskId:first.details.taskId}});
+  await h.emit("session_start"); assert.equal(latest.launched,2); assert.deepEqual(latest.tasks,[]);
+  h.branch.splice(1); await h.emit("session_tree"); assert.equal(latest.launched,1); assert.equal(runs,1);
+});
+
 test("concurrency defaults to five, accepts one through five and rejects other limits", async () => {
   for (let i = 1; i <= 5; i++) assert.equal(concurrencyLimit(String(i)), i);
   for (const value of ["0", "6", "2.5", "05", "", undefined, 5]) assert.throws(() => concurrencyLimit(value));
@@ -304,7 +323,9 @@ test("child launch retains parent resource flags, constrains runtime, and sends 
 });
 
 test("JSON runner collects final text blocks, evidence trace and settlement", async () => {
-  const result = await runChild(options());
+  const events:string[]=[];
+  const result = await runChild(options("success",{onAction:s=>events.push(s)}));
+  assert.deepEqual(events,["Leer · source.ts"]);
   assert.equal(result.status, "completed");
   assert.match(result.output, /Answer: bounded evidence\.\nLimitations:/);
   assert.doesNotMatch(result.output, /intermediate/);

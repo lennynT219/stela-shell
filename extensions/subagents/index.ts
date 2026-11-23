@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { activeState, REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
+import { REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { TaskQueue, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, executionTimeoutSeconds, concurrencyLimit, validateAssignment, type Task } from "./tasks.ts";
@@ -11,6 +11,19 @@ import {
 
 const RESULT_TYPE = "stela-subagent-result";
 const WIDGET = "ss-tasks";
+const ADMISSION = "stela-subagent-admitted";
+/** Unique identifiable admissions on this branch, including older direct receipts or delivered results. */
+export function historicalAdmissions(entries: ReturnType<ExtensionContext["sessionManager"]["getBranch"]>): number {
+  const ids = new Set<string>();
+  for (const e of entries) {
+    const data = e.type === "custom" && e.customType === ADMISSION ? e.data :
+      e.type === "custom_message" && e.customType === RESULT_TYPE ? e.details :
+      e.type === "message" && e.message.role === "toolResult" && !e.message.isError && e.message.toolName === "ss_tasks_delegate" ? e.message.details : undefined;
+    const id = (data as {taskId?: unknown} | undefined)?.taskId;
+    if (typeof id === "string" && /^task-[0-9a-f-]{36}$/.test(id)) ids.add(id);
+  }
+  return ids.size;
+}
 const assignmentSchema = {
   type: "object", additionalProperties: false, required: ["label", "objective", "references", "done_when"],
   properties: {
@@ -117,18 +130,17 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
   let owner: ExtensionContext | undefined;
   let generation = 0;
 
-  let legacyWidget = false;
+  let legacyWidget = false, historical = 0;
   const updateWidget = () => {
     if (!owner?.hasUI || !queue) return;
-    const tasks = queue.list();
-    const relevant = tasks.filter((task) => !task.delivered).slice(0, 8);
     if (owner.mode === "tui" && pi.events) {
       let claimed = false;
       pi.events.emit(TASKS_EVENT, { manager: owner.sessionManager, id: owner.sessionManager.getSessionId(),
-        tasks: relevant.flatMap(t => activeState(t.state) ? [{ label: t.assignment.label, state: t.state }] : []),
+        tasks: queue.activityRows(), launched: historical + queue.admitted,
         claim() { claimed = true; } } satisfies TaskSignal);
       if (claimed) { if (legacyWidget) owner.ui.setWidget(WIDGET, undefined); legacyWidget = false; return; }
     }
+    const relevant = queue.list().filter(task => !task.delivered).slice(0, 8);
     legacyWidget = relevant.length > 0;
     owner.ui.setWidget(WIDGET, relevant.length ? relevant.map((task) => `Ayudante · ${task.assignment.label} · ${task.state}`) : undefined);
   };
@@ -140,6 +152,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     queue = undefined;
     await old?.cancelAll(true);
     owner = ctx;
+    historical = historicalAdmissions(ctx.sessionManager.getBranch());
     queue = new TaskQueue(concurrencyLimit(pi.getFlag("ss-tasks-concurrency")), updateWidget);
     updateWidget();
   };
@@ -231,13 +244,15 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
       const invocation = launch();
       const model = `${ctx.model.provider}/${ctx.model.id}`;
       const snapshot = { assignment, cwd: ctx.cwd, model, thinking: ctx.thinkingLevel, scope, launch: invocation, trusted: ctx.isProjectTrusted(), env };
-      const { task, duplicate } = current.enqueue(assignment, JSON.stringify([ctx.cwd, model, ctx.thinkingLevel, scope]), (childSignal) => {
+      const { task, duplicate } = current.enqueue(assignment, JSON.stringify([ctx.cwd, model, ctx.thinkingLevel, scope]), (childSignal, onAction) => {
         const stillActive = new Set(pi.getActiveTools());
         if (!owns(ctx) || scope.tools.some((name) => !stillActive.has(name) || !pi.getAllTools().some((tool) => tool.name === name && isBuiltinReader(tool)))) {
           throw new Error("Parent reader availability changed before launch; no child was started.");
         }
-        return execute({ ...snapshot, signal: childSignal });
+        return execute({ ...snapshot, signal: childSignal, onAction });
       });
+      // Only the ID: no transcript, no model message, and nothing to restore or relaunch.
+      if (!duplicate) { try { pi.appendEntry(ADMISSION, {taskId: task.id}); } catch { /* Keep an admitted task valid even if session storage is unavailable. */ } }
       const abort = () => { current.cancel(task.id); };
       if (signal?.aborted) abort();
       // The run signal remains useful after the tool returns; settled/shutdown hooks cover idle cancellation.
