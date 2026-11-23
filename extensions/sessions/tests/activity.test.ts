@@ -82,7 +82,7 @@ test("a narrow notice keeps its action; a redraw between press and click cannot 
 const cli = process.env.SS_TEST_PI_CLI ?? process.env.STELA_TEST_PI_CLI;
 const hc = process.env.SS_TEST_HC;
 const run = promisify(execFile);
-for (const [file, binary] of [["activity-tui.py", undefined], ["activity-herdr.py", hc]] as const) {
+for (const [file, binary] of [["activity-tui.py", undefined], ["panel-mascot.py", undefined], ["activity-herdr.py", hc]] as const) {
   test(`two isolated Pi terminals: ${file}`, { skip: process.platform !== "linux" || !cli || (file.includes("herdr") && !binary), timeout: 60_000 }, async () => {
     const { stdout } = await run("python3", ["-B", fileURLToPath(new URL(`./fixtures/${file}`, import.meta.url)), process.execPath, cli!, ...(binary ? [binary] : [])], { timeout: 50_000, maxBuffer: 512 * 1024 });
     assert.match(stdout, /checked in two Pi terminals/);

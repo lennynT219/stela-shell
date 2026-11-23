@@ -88,10 +88,11 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
     e.claim(); view?.refresh();
   });
   pi.on("session_start", start); pi.on("session_tree", start); pi.on("session_shutdown", stop);
-  pi.registerCommand("ss-activity", { description: "Abrir o cerrar el panel de actividad.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
+  pi.registerCommand("ss-activity", { description: "Abrir o cerrar el Panel de actividad y preguntas.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
   pi.registerShortcut("alt+a", { description: "Abrir/cerrar actividad", handler: async ctx => { if (owns(ctx)) toggle(); } });
   pi.registerShortcut("alt+j", { description: "Ver la pregunta pendiente en la sesión de origen", handler: async ctx => { if (owns(ctx)) await question(state.questions[0]); } });
   return {
+    toggle,
     active: (ctx: ExtensionContext) => owns(ctx) && !!view,
     bind(ctx: ExtensionContext, transport: SessionTransport) {
       stopPeers(); if (!owns(ctx) || !transport.questionFor) return;

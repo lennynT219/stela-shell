@@ -1,12 +1,12 @@
-import type { Component, HStack, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
+import type { Component, HStack, OverlayHandle, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { PeerQuestion } from "./attention.ts";
 
 import type { TaskRow } from "../activity-events.ts";
 export interface ViewState { open: boolean; tasks: TaskRow[]; questions: PeerQuestion[] }
 export interface ViewActions { toggle(): void; question(q: PeerQuestion): void; canOpen(q: PeerQuestion): boolean }
-export interface Drawing { HStack: typeof HStack; truncateToWidth(s: string, width: number): string }
-type Host = TUI & { mode?: string; layoutRoot?: Component; setLayoutRoot?(c: Component): void };
+export interface Drawing { HStack: typeof HStack; truncateToWidth(s: string, width: number): string; matchesKey?: typeof import("@earendil-works/pi-tui").matchesKey }
+type Host = TUI & { mode?: string; layoutRoot?: Component; setLayoutRoot?(c: Component): void; getFocusedComponent?(): Component | null };
 type Line = { text: string; key?: string; action?: () => void; role?: "accent" | "warning" | "muted" };
 export const WIDE = 112, RAIL = 34;
 const labels = { queued: "En cola", running: "En curso", cancelling: "Cancelando" };
@@ -14,7 +14,7 @@ const labels = { queued: "En cola", running: "En curso", cancelling: "Cancelando
 export const plain = (s: string) => s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 120);
 const name = (q: PeerQuestion) => plain(q.name) || q.id.slice(0, 8);
 
-/** Owns only its widget and an optional split. Never replaces the editor, changes focus or reads its draft. */
+/** The narrow sheet borrows focus from the editor; Pi restores it when its own overlay handle closes. */
 export function activityView(tui: Host, theme: Theme, draw: Drawing, state: ViewState, actions: ViewActions) {
   let previous: Component | undefined, split: Component | undefined, page = 0, live = true;
   function summary(width: number): Line[] {
@@ -30,7 +30,7 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     const n = state.tasks.length;
     return n && !state.open ? [{ text: `${n} ${n === 1 ? "tarea en curso" : "tareas en curso"} · [Ver actividad · Alt+A]`, key: "toggle", action: actions.toggle }] : [];
   }
-  function panel(): Line[] {
+  function panel(width: number, sheetMode = false): Line[] {
     const entries: Line[] = [
       ...state.questions.map(q => ({ text: `${actions.canOpen(q) ? "[Ver pregunta]" : "Ver en origen"} · ${name(q)}`, role: "warning" as const, key: `${q.id}:${q.token}`,
         action: actions.canOpen(q) ? () => actions.question(q) : undefined })),
@@ -38,7 +38,7 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     ];
     const size = Math.max(1, Math.min(7, Math.floor(tui.terminal.rows / 3) - 2));
     const pages = Math.max(1, Math.ceil(entries.length / size)); page = Math.min(page, pages - 1);
-    return [{ text: "Actividad · [Cerrar · Alt+A]", key: "toggle", action: actions.toggle, role: "accent" },
+    return [{ text: sheetMode ? "Panel · [Cerrar]" : "Panel · [Cerrar · Alt+A]", key: "toggle", action: actions.toggle, role: "accent" },
       ...(entries.length ? entries.slice(page * size, (page + 1) * size) : [{ text: "Sin tareas activas", role: "muted" as const }]),
       ...(pages > 1 ? [{ text: `[Más · ${page + 1}/${pages}]`, key: `more:${page}`, action: () => { page = (page + 1) % pages; tui.requestRender(); } }] : [])];
   }
@@ -46,7 +46,7 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     let painted: Line[] = [], pressed: string | undefined;
     return {
       render(width) {
-        painted = rows(width);
+        painted = rows(rail ? Math.max(0,width-2) : width);
         return painted.map(l => draw.truncateToWidth(`${rail ? theme.fg("border", "│ ") : ""}${theme.fg(l.role ?? "accent", l.text)}`, width));
       },
       invalidate() {},
@@ -69,7 +69,39 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     previous = split = undefined;
   }
   const isDocked = () => !!split && tui.layoutRoot === split && tui.terminal.columns >= WIDE;
-  const widget = surface(width => state.open && !isDocked() ? panel() : summary(width), false);
+  const flat = surface(w => panel(w,true),false);
+  let overlay: OverlayHandle | undefined, previousFocus: Component | null = null, scheduled = false;
+  const sheet: Component = { ...flat,
+    render(width) {
+      const rows = Math.max(1,tui.terminal.rows), lines = flat.render(width).slice(0,rows);
+      while (lines.length < rows) lines.push("");
+      return lines;
+    },
+    handleInput(data) {
+      const key = draw.matchesKey;
+      if (key?.(data,"escape") || key?.(data,"alt+a")) actions.toggle();
+      else if (key?.(data,"alt+j") && state.questions[0]) actions.question(state.questions[0]);
+      else if (key?.(data,"pageDown") || key?.(data,"right")) panel(tui.terminal.columns,true).find(l=>l.key?.startsWith("more:"))?.action?.();
+    },
+  };
+  const closeSheet = () => { overlay?.hide(); overlay = undefined; previousFocus = null; };
+  const wantSheet = () => live && state.open && !isDocked() && (tui.terminal.columns < WIDE || tui.mode === "fullscreen");
+  const syncSheet = () => {
+    if (!wantSheet()) { closeSheet(); return; }
+    const focus = tui.getFocusedComponent?.();
+    if (overlay && focus !== sheet && focus !== previousFocus) closeSheet();
+    if (!overlay && focus && typeof (focus as {getExpandedText?:unknown}).getExpandedText === "function") {
+      previousFocus = focus;
+      overlay = tui.showOverlay(sheet,{anchor:"top-left", width:"100%",maxHeight:"100%",margin:0,
+        visible: () => wantSheet() && (tui.getFocusedComponent?.() === previousFocus || tui.getFocusedComponent?.() === sheet)});
+    }
+  };
+  const widget = surface(width => {
+    if (state.open && !scheduled && (wantSheet() !== !!overlay || (overlay && tui.getFocusedComponent?.() !== sheet))) {
+      scheduled = true; queueMicrotask(() => { scheduled = false; syncSheet(); });
+    }
+    return state.open && !isDocked() && !wantSheet() ? panel(width) : summary(width);
+  }, false);
   return {
     widget, refresh() {
       if (!state.open) { undock(); page = 0; }
@@ -81,8 +113,8 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
           { component: rail, basis: RAIL, minSize: RAIL, shrink: 0, visible: ({ width }) => live && state.open && tui.layoutRoot === dock && width >= WIDE }], { gap: 1 });
         split = dock; tui.setLayoutRoot(dock);
       }
-      tui.requestRender();
+      syncSheet(); tui.requestRender();
     },
-    dispose() { live = false; undock(); },
+    dispose() { live = false; closeSheet(); undock(); },
   };
 }

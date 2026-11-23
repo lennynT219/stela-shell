@@ -255,6 +255,9 @@ export default async function sessions(pi: ExtensionAPI): Promise<void> {
   registerCommandSearch(pi);
   registerTurnHint(pi, CustomEditor, action => drawing.getKeybindings().getKeys(action), truncateToWidth);
   const { registerActivity } = await import("./activity.ts");
-  registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0), incomingRenderer: familyMessage("sessions",drawing), panel: registerActivity(pi, { HStack, truncateToWidth },
-    c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent) });
+  const panel = registerActivity(pi, { HStack, truncateToWidth, matchesKey: drawing.matchesKey },
+    c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent);
+  const { registerPanelEditor } = await import("./panel-editor.ts");
+  registerPanelEditor(pi, CustomEditor, drawing, panel.toggle);
+  registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0), incomingRenderer: familyMessage("sessions",drawing), panel });
 }

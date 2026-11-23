@@ -13,11 +13,19 @@ export default function fixture(pi: ExtensionAPI) {
   } }), { run: ({ signal }) => new Promise(resolve => { pending.push(resolve); signal.addEventListener("abort", () => resolve({ status: "cancelled", output: "", error: "", diagnostics: "", trace: [], truncated: false }), { once: true }); }) });
   pi.on("session_start", (_e, ctx) => {
     ctx.ui.setWidget("fixture-screen", (tui) => { screen = tui; return { render: () => [], invalidate() {} }; });
+    ctx.ui.onTerminalInput(data => {
+      if (process.env.SS_TEST_PANEL_DIALOG && screen?.isOverlayFocused() && data === "\x1b[21~") {
+        void ask(ctx); return {consume:true};
+      }
+      if (data !== "\x1b[19~" || !screen) return;
+      snapshot(ctx); return {consume:true};
+    });
   });
-  pi.registerShortcut("f8", { description: "Read synthetic fixture frame", handler: async ctx => {
+  const snapshot = (ctx:ExtensionContext) => {
     const lines = screen.mode === "regular" ? screen.captureRenderState().previousLines.slice(-screen.terminal.rows) : screen.getScreenLines();
     writeFileSync(out + ".tmp", JSON.stringify({ lines, draft: ctx.ui.getEditorText() })); renameSync(out + ".tmp", out);
-  } });
+  };
+  pi.registerShortcut("f8", { description:"Read synthetic fixture frame", handler: async ctx => snapshot(ctx) });
   pi.registerShortcut("f5", { description: "Start synthetic task", handler: async ctx => {
     const n = ++serial;
     await delegate.execute("fixture", { label: `Revisión ${n}`, objective: `Fixture ${n}`, references: ["sample.txt"], done_when: "done" }, undefined, undefined, ctx);
