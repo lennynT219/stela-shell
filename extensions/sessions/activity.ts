@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { activeState, REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
 import { readCodexQuota, type Quota } from "./codex-quota.ts";
+import { capabilityLines } from "./capabilities.ts";
 import { watchGit } from "./git-summary.ts";
 import { activityView, type Drawing, type ViewState } from "./activity-view.ts";
 import { herdrRoute, watchQuestions, type AttentionTransport, type PeerQuestion } from "./attention.ts";
@@ -92,13 +93,15 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   const stop = () => {
     lifetime.abort(); stopPeers(); clearGit(); clearQuota(); view?.dispose();
     owner?.ui.setWidget(widgetKey, undefined); owner = undefined; host = view = undefined;
-    state.open = false; state.tasks = []; state.launched = 0; state.questions = []; jumping = false; session = "";
+    state.open = false; state.capabilitiesExpanded = false; state.tasks = []; state.launched = 0; state.questions = []; jumping = false; session = "";
   };
   const start = (_event: unknown, ctx: ExtensionContext) => {
     stop(); if (ctx.mode !== "tui") return;
     owner = ctx; session = ctx.sessionManager.getSessionId(); lifetime = new AbortController(); displayRoute = dependencies.route();
     ctx.ui.setWidget(widgetKey, (tui, theme) => {
-      view?.dispose(); host = tui; view = activityView(tui, theme, drawing, state, { toggle, question, canOpen });
+      view?.dispose(); host = tui; view = activityView(tui, theme, drawing, state, {
+        toggle, question, canOpen, capabilities: () => capabilityLines(pi.getActiveTools()),
+      });
       if (state.open) view.refresh();
       const widget = view.widget;
       return { ...widget, render(width) { watching?.sync(); return widget.render(width); } };
@@ -124,6 +127,9 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   });
   pi.registerCommand("ss-activity", { description: "Abrir o cerrar el Panel de Git, actividad y preguntas.", handler: async (_args, ctx) => { if (owns(ctx)) toggle(); } });
   pi.registerShortcut("alt+a", { description: "Abrir/cerrar actividad", handler: async ctx => { if (owns(ctx)) toggle(true); } });
+  pi.registerShortcut("alt+c", { description: "Plegar o desplegar Capacidades en el Panel abierto", handler: async ctx => {
+    if (owns(ctx)) view?.toggleCapabilitiesFromEditor();
+  } });
   pi.registerShortcut("alt+j", { description: "Ver la pregunta pendiente en la sesión de origen", handler: async ctx => { if (owns(ctx)) await question(state.questions[0]); } });
   return {
     toggle,

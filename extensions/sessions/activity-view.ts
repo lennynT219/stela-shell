@@ -5,8 +5,8 @@ import type { PeerQuestion } from "./attention.ts";
 import { quotaLines, type Quota } from "./codex-quota.ts";
 import type { GitSummary } from "./git-summary.ts";
 import type { TaskRow } from "../activity-events.ts";
-export interface ViewState { open: boolean; tasks: TaskRow[]; launched?: number; questions: PeerQuestion[]; git?: GitSummary; quota?: Quota }
-export interface ViewActions { toggle(): void; question(q: PeerQuestion): void; canOpen(q: PeerQuestion): boolean }
+export interface ViewState { open: boolean; tasks: TaskRow[]; launched?: number; questions: PeerQuestion[]; git?: GitSummary; quota?: Quota; capabilitiesExpanded?: boolean }
+export interface ViewActions { toggle(): void; question(q: PeerQuestion): void; canOpen(q: PeerQuestion): boolean; capabilities?(): string[] }
 export interface Drawing { HStack: typeof HStack; truncateToWidth(s: string, width: number): string; wrap?: (s: string, width: number) => string[]; matchesKey?: typeof import("@earendil-works/pi-tui").matchesKey }
 type Host = TUI & { mode?: string; layoutRoot?: Component; setLayoutRoot?(c: Component): void; getFocusedComponent?(): Component | null };
 type Line = { text: string; key?: string; action?: () => void; role?: "accent" | "warning" | "muted" };
@@ -32,7 +32,13 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     const n = state.tasks.length;
     return n && !state.open ? [{ text: `${n} ${n === 1 ? "tarea en curso" : "tareas en curso"} · [Ver actividad · Alt+A]`, key: "toggle", action: actions.toggle }] : [];
   }
-  let selected: string | undefined, detail: TaskRow | undefined, detailPage = 0;
+  let selected: string | undefined, detail: TaskRow | undefined, detailPage = 0, capabilitiesFocused = false;
+  const toggleCapabilities = () => {
+    if (!state.open || detail || !actions.capabilities) return;
+    state.capabilitiesExpanded = !state.capabilitiesExpanded;
+    capabilitiesFocused = true;
+    tui.requestRender();
+  };
   let borrowed: Component | null = null, timer: ReturnType<typeof setTimeout> | undefined, frame = 0;
   const release = () => {
     if (borrowed && [rail,widget].includes(tui.getFocusedComponent?.() as Component)) tui.setFocus(borrowed);
@@ -79,11 +85,12 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     ];
     const focus = tui.getFocusedComponent?.(), browsing = focus === sheet || focus === rail || focus === widget;
     if (!state.tasks.some(t => t.id===selected)) selected = state.tasks[0]?.id;
+    const onCapabilities = !!actions.capabilities && (capabilitiesFocused || !state.tasks.length);
     const n = state.launched ?? 0;
     const header = {text:`Subagentes · ${n} ${n === 1 ? "lanzado" : "lanzados"}`};
     const taskLines = state.tasks.map(t => {
       const sign = t.state === "running" ? "⠋⠙⠹⠸"[frame%4] : t.state === "queued" ? "◷" : "■ Cancelando";
-      return {text:`${browsing && selected===t.id ? "› " : ""}${sign} ${plain(t.label)}`, key:t.id, action:() => inspect(t.id)};
+      return {text:`${browsing && !onCapabilities && selected===t.id ? "› " : ""}${sign} ${plain(t.label)}`, key:t.id, action:() => inspect(t.id)};
     });
     if (state.tasks.some(t=>t.state==="running") && !timer && live && state.open) {
       timer = setTimeout(() => { timer=undefined; if (state.open && live) { frame++; tui.requestRender(); } }, 360); timer.unref();
@@ -92,9 +99,21 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
     page = Math.min(page,Math.max(0,Math.ceil(combined.length/size)-1));
     const visible = paged(combined,size,page,n => { page=n; selected=state.tasks[Math.max(0,n*size-entries.length)]?.id; });
     const questionCount = Math.min(size,Math.max(0,entries.length-page*size));
-    return [title, ...gitRow, ...visible.slice(0,questionCount), header, ...visible.slice(questionCount),
+    const rows: Line[] = [title, ...gitRow, ...visible.slice(0,questionCount), header, ...visible.slice(questionCount),
       ...(!n && !taskLines.length ? [{text:"Sin tareas activas",role:"muted" as const}] : []),
       ...(state.quota ? quotaLines(state.quota).map(text=>({text})) : [])];
+    if (actions.capabilities) {
+      const expanded = !!state.capabilitiesExpanded, heading = rows.length;
+      rows.push({ text: `${browsing && onCapabilities ? "› " : ""}${expanded ? "▾" : "▸"} Capacidades`, key: "capabilities", action: toggleCapabilities });
+      if (expanded) rows.push(...actions.capabilities().map(text => ({ text, role: "muted" as const })));
+      // In a very short fullscreen surface, keep the focused section (and the close control) in view.
+      const height = tui.terminal.rows;
+      if (browsing && onCapabilities && (sheetMode || isDocked()) && height > 1 && rows.length > height) {
+        const start = Math.min(heading, rows.length - height + 1);
+        return [title, ...rows.slice(start, start + height - 1)];
+      }
+    }
+    return rows;
   }
   function surface(rows: (width: number) => Line[], rail: boolean): Component {
     let painted: Line[] = [], pressed: string | undefined;
@@ -120,13 +139,21 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
   const keyInput = (data:string) => {
     const key = (s: Parameters<NonNullable<Drawing["matchesKey"]>>[1]) => draw.matchesKey?.(data,s);
     if (key("alt+a")) actions.toggle();
+    else if (key("alt+c")) toggleCapabilities();
     else if (key("escape") || (detail && key("left"))) { if (detail) back(); else actions.toggle(); }
     else if (key("alt+j") && state.questions[0]) actions.question(state.questions[0]);
     else if (!detail && (key("up") || key("down"))) {
-      const i=state.tasks.findIndex(t=>t.id===selected), next=Math.max(0,Math.min(state.tasks.length-1,i+(key("down")?1:-1)));
-      selected=state.tasks[next]?.id; page=Math.floor((state.questions.length+next)/pageSize()); tui.requestRender();
-    } else if (!detail && selected && key("enter")) inspect(selected);
-    else if (key("pageDown") || key("right")) panel(isDocked()?RAIL-2:tui.terminal.columns,!isDocked()).find(l=>l.key?.startsWith("more:"))?.action?.();
+      const count = state.tasks.length;
+      const onCapabilities = !!actions.capabilities && (capabilitiesFocused || count === 0);
+      const i = onCapabilities ? count : Math.max(0, state.tasks.findIndex(t => t.id === selected));
+      const next = Math.max(0, Math.min(actions.capabilities ? count : count - 1, i + (key("down") ? 1 : -1)));
+      capabilitiesFocused = !!actions.capabilities && next === count;
+      if (!capabilitiesFocused) { selected = state.tasks[next]?.id; page = Math.floor((state.questions.length + next) / pageSize()); }
+      tui.requestRender();
+    } else if (!detail && key("enter")) {
+      if (actions.capabilities && (capabilitiesFocused || !state.tasks.length)) toggleCapabilities();
+      else if (selected) inspect(selected);
+    } else if (key("pageDown") || key("right")) panel(isDocked()?RAIL-2:tui.terminal.columns,!isDocked()).find(l=>l.key?.startsWith("more:"))?.action?.();
   };
   const rail = surface(panel, true);
   rail.handleInput = keyInput;
@@ -167,9 +194,13 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
   widget.handleInput = keyInput;
   return {
     focusList,
+    toggleCapabilitiesFromEditor() {
+      const from = tui.getFocusedComponent?.();
+      if (typeof (from as {getExpandedText?: unknown} | null)?.getExpandedText === "function") toggleCapabilities();
+    },
     updateDetail(rows:TaskRow[]) { if (detail) detail = rows.find(t=>t.id===detail!.id) ?? detail; },
     widget, refresh() {
-      if (!state.open) { release(); undock(); page = 0; detail=undefined; selected=undefined; clearTimeout(timer); timer=undefined; }
+      if (!state.open) { release(); undock(); page = 0; detail=undefined; selected=undefined; capabilitiesFocused = false; clearTimeout(timer); timer=undefined; }
       else if (!split && tui.mode === "fullscreen" && typeof tui.setLayoutRoot === "function" && typeof tui.layoutRoot?.render === "function") {
         // Pi 1.6 exposes the native fullscreen root at runtime, but not in the extension interface.
         // If unavailable, keep the in-place list. Never patch a host method or cover transcript columns.
