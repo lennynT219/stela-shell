@@ -40,6 +40,9 @@ with workspace() as (root, profile):
         menu(); highlight_fast(); t.key(b'\x1b'); t.wait(footer(False),'cancel without activation')
         menu(); highlight_fast(); t.key(b'\r'); t.wait(footer(True),'fast footer after explicit choice')
         assert rows() == [{'quota':True},{'catalog':True},{'catalog':True}], 'only read-only GETs until a user turn'
+        t.paste('/reload'); t.key(b'\r')
+        t.wait(lambda l,d:has(l,'Reloaded keybindings') and footer(True)(l,d),'reload revalidates and restores Fast in the same chat')
+        assert rows() == [{'quota':True},{'catalog':True},{'catalog':True},{'catalog':True}], 'reload did one catalog GET, not a turn'
         t.paste('ejemplo uno'); t.key(b'\r'); t.wait(lambda l,d:has(l,'Respuesta local 1'),'first simulated response')
         menu(); t.key(b'\r'); t.wait(footer(False),'standard after explicit reset')
         t.paste('ejemplo dos'); t.key(b'\r'); t.wait(lambda l,d:has(l,'Respuesta local 2'),'second simulated response')
@@ -47,6 +50,12 @@ with workspace() as (root, profile):
         t.paste('/model ss-fixture/deterministic'); t.key(b'\r'); t.wait(lambda l,d:any('Ctx ' in s and s.strip().endswith('deterministic') for s in l),'other provider has no speed suffix')
         t.paste('/model openai-codex/'+model); t.key(b'\r'); t.wait(lambda l,d:any('Ctx ' in s and model in s and ' · fast' not in s for s in l),'returning to Codex does not restore Fast')
         assert [r for r in rows() if 'model' in r] == [{'model':model,'tier':'priority'},{'model':model,'tier':None}]
+        menu(); highlight_fast(); t.key(b'\r')
+        t.wait(lambda l,d:not has(l,'Mayor velocidad') and any('Ctx ' in s and model in s and s.strip().endswith(' · fast') for s in l),'Fast before leaving this chat')
+        before = rows()
+        t.paste('/new'); t.key(b'\r')
+        t.wait(lambda l,d:not has(l,'Respuesta local') and any('Ctx ' in s and model in s and ' · fast' not in s for s in l),'a new chat starts in Standard')
+        assert rows() == before, 'a new chat does not revalidate the previous speed'
         assert (profile/'auth.json').read_text() == auth and not home.exists(), 'no second login or another credential store'
     finally:
         t.close()

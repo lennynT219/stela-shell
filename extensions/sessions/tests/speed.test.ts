@@ -93,7 +93,41 @@ test("explicit, revocable choice applies only to a matching Codex chat request; 
   const calls=hits;ctx.model.provider="openai";await menu();assert.equal(hits,calls);
 });
 
+test("reload consumes the same-chat handoff once and restores only a still-advertised tier for the same login", async () => {
+  for (const scenario of ["valid", "new", "quit", "different-manager", "different-session", "different-cwd", "different-model", "different-login", "retired-tier", "unavailable"] as const) {
+    const {ctx,read,grant} = codexHost();
+    ctx.cwd = "/fixture";
+    let catalog = { tiers: [fast] as (typeof fast)[] | undefined, fingerprint: createHash("sha256").update(token).digest("hex") }, queries = 0;
+    ctx.ui.select = async () => "Fast";
+    const runtime = () => {
+      const events: Record<string,Function> = {};
+      let menu!: Function;
+      const speed = registerSpeed({on:(name:string,f:Function)=>events[name]=f,registerCommand:(_:string,c:any)=>menu=c.handler} as any,
+        read, async () => { queries++; return catalog; });
+      return { speed, menu, emit:(name:string, reason:string, context=ctx)=>events[name]({reason},context) };
+    };
+    const old = runtime();
+    await old.menu("",ctx); assert.equal(old.speed(ctx),"fast",scenario);
+    old.emit("session_shutdown",scenario==="quit"?"quit":"reload"); assert.equal(old.speed(ctx),undefined);
+    const next = runtime();
+    const target = {...ctx,model:{...ctx.model}};
+    if (scenario==="different-manager") target.sessionManager = {getSessionId:()=>"fixture"};
+    if (scenario==="different-session") target.sessionManager.getSessionId = ()=>"different";
+    if (scenario==="different-cwd") target.cwd = "/another";
+    if (scenario==="different-model") target.model.id = "other";
+    if (scenario==="different-login") grant.access += "rotated";
+    if (scenario==="retired-tier") catalog = {...catalog,tiers:[]};
+    if (scenario==="unavailable") catalog = {...catalog,tiers:undefined};
+    await next.emit("session_start",scenario==="new"?"new":"reload",target);
+    assert.equal(next.speed(target),scenario==="valid"?"fast":undefined,scenario);
+    assert.equal(queries,["valid","retired-tier","unavailable"].includes(scenario)?2:1,scenario);
+    const repeat = runtime();
+    await repeat.emit("session_start","reload",target);
+    assert.equal(repeat.speed(target),undefined,scenario);
+  }
+});
+
 const cli=process.env.SS_TEST_PI_CLI;
-test("Pi TUI: browsing/cancelling sends no turn; Fast changes only the requested tier, Estándar removes it",{skip:process.platform!=="linux"||!cli,timeout:45000},async()=>{
+test("Pi TUI: a reload preserves verified Fast, but a new chat and Standard do not inherit it",{skip:process.platform!=="linux"||!cli,timeout:45000},async()=>{
   await promisify(execFile)("python3",["-B",fileURLToPath(new URL("./fixtures/speed-tui.py",import.meta.url)),process.execPath,cli!],{timeout:40000});
 });

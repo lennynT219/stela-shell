@@ -34,6 +34,11 @@ with workspace() as (root, profile):
             before=rows(); lines=menu('Mayor velocidad'); assert has(lines,label)
             t.key(b'\x1b[B'); t.wait(lambda l,d:has(l,'→ '+label),'highlight '+label); t.key(b'\r'); footer(model,label.lower())
             assert rows()==before+[{'catalog':True}], 'menu must make only a catalog GET'
+            if not i:
+                submit('/reload')
+                t.wait(lambda l,d:has(l,'Reloaded keybindings') and any('Ctx ' in s and model in s and s.strip().endswith(' · fast') for s in l),
+                       'the direct login restores the same speed after reload')
+                assert rows()==before+[{'catalog':True},{'catalog':True}], 'reload only rechecks the catalog'
             submit('Turno de prueba'); t.wait(lambda l,d:has(l,'Respuesta local '+str(i+1)),'simulated response')
             assert rows()[-1]=={'model':model,'tier':expected}
         # Only an explicit reset drops the tier for the same model; a model with no tiers has no paid choice.
