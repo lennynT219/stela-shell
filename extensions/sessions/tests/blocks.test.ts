@@ -80,6 +80,10 @@ test("summary uses receipts, not guesses about counts, note titles, delivery, ca
   assert.equal(result("ss_knowledge_read",{note_id:"123"},{},[text('{"title":"Niñez"}')]).subject,"Niñez");
   assert.match(result("ss_knowledge_update",{note_id:"123"},{status:"read_required"},[],true).subject,/título no disponible/);
   assert.equal(result("ss_knowledge_create",{title:"Diseño"},{status:"created",title:"Diseño"}).notice,"Creada");
+  const renamed=result("ss_knowledge_rename",{title:"Diseño"},{status:"renamed",title:"Diseño"});
+  assert.equal(renamed.verb,"Renombrar"); assert.equal(renamed.subject,"Diseño"); assert.equal(renamed.notice,"Renombrada");
+  const partial=result("ss_knowledge_rename",{title:"Diseño"},{status:"partial",write_paused:true},[],true);
+  assert.equal(partial.level,"warn"); assert.equal(partial.notice,"Parcial · Escritura pausada");
   assert.equal(result("ss_sessions_send",{to:"f".repeat(32)},{status:"accepted",peerName:"Diseño"}).subject,"→ Diseño");
   assert.equal(result("ss_sessions_send",{},{status:"accepted"}).notice,"Aceptado para entrega");
   assert.doesNotMatch(result("ss_sessions_send",{},{peerName:"f".repeat(32)}).subject,/[a-f0-9]{32}/);

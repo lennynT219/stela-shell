@@ -59,7 +59,7 @@ export function batchLines(details: unknown, live: readonly Fact[], expanded: bo
       if (parentImage === false) row.level = "warn";
       row.notice = [row.notice, parentImage === false ? "Imagen no mostrada en la salida" : "Imagen devuelta"].filter(Boolean).join(" · ");
     }
-    if (!row.subject && c.status !== "running" && ["ss_knowledge_read","ss_knowledge_update","ss_knowledge_create"].includes(c.name)) row.subject = "título no disponible";
+    if (!row.subject && c.status !== "running" && ["ss_knowledge_read","ss_knowledge_update","ss_knowledge_create","ss_knowledge_rename"].includes(c.name)) row.subject = "título no disponible";
     const canFold = !expanded && c.status === "ok" && row.level === "ok" && fact && !fact.image && foldable(c.name);
     if (canFold && group === c.name) {
       count++; const leader = rows[rows.length-1]; leader.subject = `×${count}`; leader.notice = "";

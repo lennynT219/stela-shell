@@ -9,10 +9,10 @@ import { parse, stringify, uuid, type ObjectValue } from "../memory/protocol.ts"
 
 export const NOTE_BYTES = 512 * 1024;
 const IO_BYTES = 4 * 1024 * 1024;
-export type Operation = "list" | "read" | "create" | "update";
+export type Operation = "list" | "read" | "create" | "update" | "rename";
 export type Call = (operation: Operation, args: ObjectValue, signal: AbortSignal) => Promise<ObjectValue>;
-export const writing = (op: Operation) => op === "create" || op === "update";
-const failures = new Set(["invalid", "unsupported", "unbound", "unavailable", "denied", "not_found", "conflict", "busy", "input_limit", "output_limit", "save_unconfirmed"]);
+export const writing = (op: Operation) => op === "create" || op === "update" || op === "rename";
+const failures = new Set(["invalid", "unsupported", "unbound", "unavailable", "denied", "not_found", "conflict", "busy", "input_limit", "output_limit", "save_unconfirmed", "partial"]);
 const record = (v: unknown): v is ObjectValue => v !== null && typeof v === "object" && !Array.isArray(v);
 const exact = (obj: ObjectValue, ...keys: string[]) => Object.keys(obj).length === keys.length && keys.every(k => Object.hasOwn(obj, k));
 const bytes = (v: unknown, max: number): v is string => typeof v === "string" && Buffer.byteLength(v) <= max;
@@ -44,7 +44,12 @@ export function decodeReceipt(output: Uint8Array, requestId: string, op: Operati
     const fields = ["status", "project_id", "note_id", "title"];
     if (op === "read") {
       if (r.status !== "found" || !exact(r, ...fields, "markdown", "body") || !bytes(r.markdown, NOTE_BYTES) || !bytes(r.body, NOTE_BYTES)) return invalid();
-    } else if (!exact(r, ...fields) || (op === "create" ? r.status !== "created" || r.title !== args.title : r.status !== "updated" && r.status !== "unchanged")) return invalid();
+    } else {
+      if (!exact(r, ...fields)) return invalid();
+      if (op === "create" && (r.status !== "created" || r.title !== args.title)) return invalid();
+      if (op === "update" && r.status !== "updated" && r.status !== "unchanged") return invalid();
+      if (op === "rename" && ((r.status !== "renamed" && r.status !== "unchanged") || r.title !== args.title)) return invalid();
+    }
   }
   return r;
 }

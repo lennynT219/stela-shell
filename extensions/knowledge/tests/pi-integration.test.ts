@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const cli = process.env.SS_TEST_PI_CLI, brain = process.env.SS_TEST_BRAIN_NOTES_EXE;
+const renameBrain = process.env.SS_TEST_BRAIN_NOTES_RENAME_EXE;
 const provider = fileURLToPath(new URL("./fixtures/provider.ts", import.meta.url));
 const extension = fileURLToPath(new URL("../index.ts", import.meta.url));
 const expected = "# Naming conventions\r\n\r\n## Example\r\n\r\nNota sintética para verificar acentos y finales de línea.\r\n";
@@ -25,12 +26,12 @@ function prepare(root: string) {
   return work;
 }
 
-async function freshPi(root: string, work: string, mode: "write" | "read" | "update", sourcePath: string, note?: string) {
-  const tools = { write: "ss_knowledge_list,ss_knowledge_create", read: "ss_knowledge_read", update: "ss_knowledge_read,ss_knowledge_update" };
+async function freshPi(root: string, work: string, mode: "write" | "read" | "update" | "rename", sourcePath: string, note?: string, binary = brain) {
+  const tools = { write: "ss_knowledge_list,ss_knowledge_create", read: "ss_knowledge_read", update: "ss_knowledge_read,ss_knowledge_update", rename: "ss_knowledge_read,ss_knowledge_rename" };
   const child = spawn(process.execPath, [cli!, "--offline", "--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-approve", "--extension", provider, "--extension", extension,
     "--tools", tools[mode], "--model", "ss-knowledge-fixture/deterministic", "--thinking", "off"], {
     cwd: work, env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, SS_KNOWLEDGE_CASE: mode, SS_KNOWLEDGE_SOURCE: sourcePath, SS_KNOWLEDGE_NOTE: note,
-      BRAIN_BIN: brain!, HOME: root, USERPROFILE: root, TMPDIR: root, PI_CODING_AGENT_DIR: join(root, "agent"), NO_UPDATE_NOTIFIER: "1" }, stdio: ["pipe", "pipe", "pipe"],
+      BRAIN_BIN: binary!, HOME: root, USERPROFILE: root, TMPDIR: root, PI_CODING_AGENT_DIR: join(root, "agent"), NO_UPDATE_NOTIFIER: "1" }, stdio: ["pipe", "pipe", "pipe"],
   });
   let stderr = "", output = 0;
   child.stderr.on("data", data => { stderr = (stderr + data.toString()).slice(-8192); });
@@ -84,5 +85,40 @@ test("isolated Pi + Brain: create and recover a named Project note in a fresh re
     assert.deepEqual(updated, { status: "updated", note_id: created.note_id, title: "Naming conventions" });
     assert.equal(readFileSync(noteFile, "utf8"), frontmatter + revised);
     assert.deepEqual(await freshPi(root, work, "read", input, created.note_id), [{ ...found, body: revised }]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("isolated Pi + Brain: rename by UUID, reject collisions and recover in a fresh session", { skip: !cli || !renameBrain, timeout: 50_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "ss-knowledge-rename-pi-"));
+  try {
+    const work = prepare(root);
+    const input = join(root, "title.txt");
+    const notes = join(root, "vault", "01-proyectos", "fixture", "notas");
+    const note_id = "33333333-3333-4333-8333-333333333333";
+    const original = "Nombre original", title = "Título nuevo";
+    const source = join(notes, `${original}.md`), destination = join(notes, `${title}.md`);
+    const link = 'project_link: "[[01-proyectos/fixture/Fixture]]"';
+    const frontmatter = (id: string, t: string) => `---\r\nbrain_type: note\r\nbrain_version: 1\r\nbrain_id: ${id}\r\ntitle: "${t}"\r\n${link}\r\n---\r\n`;
+    const before = frontmatter(note_id, original) + expected;
+    const incoming = frontmatter(outsider, "Referencia") + `[[${original}]]\r\n`;
+    const reference = join(notes, "Referencia.md");
+    writeFileSync(source, before); writeFileSync(reference, incoming);
+    const run = (mode: "read" | "rename") => freshPi(root, work, mode, input, note_id, renameBrain);
+    const found = { status: "found", note_id, title: original, body: expected };
+    writeFileSync(input, "Referencia");
+    assert.deepEqual(await run("rename"), [found, { status: "conflict" }]);
+    assert.equal(readFileSync(source, "utf8"), before);
+    assert.equal(readFileSync(reference, "utf8"), incoming);
+    writeFileSync(input, title);
+    assert.deepEqual(await run("rename"), [found, { status: "renamed", note_id, title }]);
+    assert.equal(existsSync(source), false);
+    assert.equal(readFileSync(destination, "utf8"), frontmatter(note_id, title) + expected);
+    assert.equal(readFileSync(reference, "utf8"), incoming);
+    assert.deepEqual(await run("read"), [{ ...found, title }]);
+    assert.deepEqual(await run("rename"), [{ ...found, title }, { status: "unchanged", note_id, title }]);
+    // Synthetic retained intent: an ordinary read must not hide Brain's partial status.
+    writeFileSync(join(notes, ".brain-note-rename.json"), "{}\n");
+    assert.deepEqual(await run("read"), [{ status: "partial", write_paused: true }]);
+    assert.equal(readFileSync(destination, "utf8"), frontmatter(note_id, title) + expected);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

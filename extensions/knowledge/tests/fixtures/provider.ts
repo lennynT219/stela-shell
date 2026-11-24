@@ -20,6 +20,8 @@ export default function provider(pi: ExtensionAPI) {
           tool("create", { title: "Naming conventions", body: readFileSync(process.env.SS_KNOWLEDGE_SOURCE!, "utf8") });
         else if (mode === "update" && last.toolName === "ss_knowledge_read" && !last.isError)
           tool("update", { note_id: process.env.SS_KNOWLEDGE_NOTE, body: readFileSync(process.env.SS_KNOWLEDGE_SOURCE!, "utf8") });
+        else if (mode === "rename" && last.toolName === "ss_knowledge_read" && !last.isError)
+          tool("rename", { note_id: process.env.SS_KNOWLEDGE_NOTE, title: readFileSync(process.env.SS_KNOWLEDGE_SOURCE!, "utf8") });
         else content.push({ type: "text", text: "KNOWLEDGE_FIXTURE_DONE" });
         const stopReason = content[0].type === "toolCall" ? "toolUse" : "stop";
         const message: any = { role: "assistant", content, api: model.api, model: model.id, provider: model.provider, timestamp: Date.now(), stopReason,

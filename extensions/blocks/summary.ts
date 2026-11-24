@@ -39,11 +39,11 @@ export function outcome(name: string, base: Line, r: Result, partial = false, er
   const clipped = Boolean(d.truncated || field(d.truncation).truncated || d.fullOutputPath);
   if (partial) return { ...v, level: clipped ? "warn" : "pending", notice: clipped ? "En curso · Salida parcial" : "En curso" };
   if (error || r.isError || status === "error" || ["save_unconfirmed", "write_paused", "denied", "conflict", "manual_review"].includes(status)) {
-    if (!v.subject && ["ss_knowledge_read","ss_knowledge_update"].includes(name)) v.subject = "título no disponible";
+    if (!v.subject && ["ss_knowledge_read","ss_knowledge_update","ss_knowledge_rename"].includes(name)) v.subject = "título no disponible";
     const exit = name === "bash" ? textOf(r).slice(-100).match(/Command exited with code (-?\d+)\s*$/)?.[1] : undefined;
     const reason = named(d.code) || (status && status !== "error" ? named(status) : "") || (exit ? `Salida ${exit}` : messageOf(r)) || "Error";
     const safeReason = v.family === "sessions" ? reason.replace(/\b(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\b/gi,"…") : reason;
-    return { ...v, level: ["pending", "manual_review", "partial", "save_unconfirmed", "write_paused"].includes(status) || d.code === "HUMAN_APPROVAL_REQUIRED" ? "warn" : "error", notice: clipped ? `${safeReason} · Parcial` : safeReason };
+    return { ...v, level: ["pending", "manual_review", "partial", "save_unconfirmed", "write_paused"].includes(status) || d.code === "HUMAN_APPROVAL_REQUIRED" ? "warn" : "error", notice: [safeReason, clipped ? "Parcial" : "", d.write_paused ? "Escritura pausada" : ""].filter(Boolean).join(" · ") };
   }
   switch (name) {
     case "ss_knowledge_list": {
@@ -56,9 +56,9 @@ export function outcome(name: string, base: Line, r: Result, partial = false, er
       const n = x.additionalCount ?? x.sources?.length;
       v.subject = [short(x.principalName ?? x.principal?.title), Number.isSafeInteger(n) && n > 0 ? `+${n} solo lectura` : ""].filter(Boolean).join(" · "); break;
     }
-    case "ss_knowledge_create": case "ss_knowledge_read": case "ss_knowledge_update":
+    case "ss_knowledge_create": case "ss_knowledge_read": case "ss_knowledge_update": case "ss_knowledge_rename":
       v.subject = short(d.title ?? json(r).title) || v.subject || "título no disponible";
-      v.notice = status === "unchanged" ? "Sin cambios" : status === "updated" ? "Actualizada" : status === "created" ? "Creada" : "";
+      v.notice = status === "unchanged" ? "Sin cambios" : status === "updated" ? "Actualizada" : status === "renamed" ? "Renombrada" : status === "created" ? "Creada" : "";
       break;
     case "write": v.notice = "Escrito"; break;
     case "edit": v.notice = "Editado"; break;

@@ -11,6 +11,7 @@ export const TOOLS = {
   codemode: ["code", "Acciones"], ss_memory_read: ["memory", "Leer"], ss_memory_save: ["memory", "Guardar"],
   ss_knowledge_sources: ["knowledge", "Fuentes"], ss_knowledge_list: ["knowledge", "Listar"],
   ss_knowledge_read: ["knowledge", "Leer"], ss_knowledge_create: ["knowledge", "Crear"], ss_knowledge_update: ["knowledge", "Actualizar"],
+  ss_knowledge_rename: ["knowledge", "Renombrar"],
   ss_web_search: ["web", "Buscar"], ss_web_read: ["web", "Leer"],
   ss_sessions_list: ["sessions", "Listar"], ss_sessions_send: ["sessions", "Enviar"],
   ss_tasks_delegate: ["tasks", "Delegar"], ss_tasks_cancel: ["tasks", "Cancelar"],

@@ -107,6 +107,38 @@ test("additional sources require explicit selection and never seed a write basel
   assert.deepEqual(await h.run("read", { project_id: additional, note_id: note }), { status: "source_not_enabled" });
 });
 
+test("rename requires an active write tool and a principal read, consumes its baseline, and never retries an older Brain", async () => {
+  const h = fixture(); h.emit("input", { source: "interactive" }); h.select([additional]);
+  const args = { note_id: note, title: "Nombre nuevo" };
+  assert.deepEqual(await h.run("rename", args), { status: "denied" });
+  h.active.add("ss_knowledge_rename");
+  await h.run("read", { project_id: additional, note_id: note });
+  assert.deepEqual(await h.run("rename", args), { status: "read_required" });
+  await h.run("read", { note_id: note });
+  assert.deepEqual(await h.run("rename", { ...args, project_id: additional }), { status: "invalid" });
+  assert.deepEqual(await h.run("rename", { ...args, expected_markdown: "invented" }), { status: "invalid" });
+  h.setWrite({ status: "unsupported" });
+  assert.deepEqual(await h.run("rename", args), { status: "unsupported" });
+  assert.deepEqual(await h.run("rename", args), { status: "read_required" });
+  assert.deepEqual(h.calls.filter(c => c.operation === "rename"), [{ operation: "rename", args: { ...args, project_id: project, expected_markdown: markdown } }]);
+  await h.run("read", { note_id: note });
+  h.setWrite({ ...meta, status: "renamed", title: args.title });
+  assert.deepEqual(await h.run("rename", args), { ...args, status: "renamed" });
+});
+
+test("partial or unconfirmed rename pauses all Knowledge writes", async () => {
+  for (const status of ["partial", "save_unconfirmed"]) {
+    const h = fixture(); h.emit("input", { source: "rpc" });
+    h.active.add("ss_knowledge_rename"); h.active.add("ss_knowledge_update");
+    await h.run("read", { note_id: note });
+    h.setWrite({ status });
+    assert.deepEqual(await h.run("rename", { note_id: note, title: "Otro" }), status === "partial" ? { status, write_paused: true } : { status });
+    assert.equal((await h.run("read", { note_id: note })).status, "found");
+    assert.deepEqual(await h.run("update", { note_id: note, body: "new" }), { status: "write_paused" });
+    assert.equal(h.calls.filter(c => c.operation === "rename" || c.operation === "update").length, 1);
+  }
+});
+
 test("checks strict receipt correlation and does not disclose failure messages", () => {
   const id = "request", wire = (data: object, request_id = id) => Buffer.from(JSON.stringify({ protocol_version: 1, request_id, result: data }) + "\n");
   const found = { status: "found", ...meta, markdown, body: "# Names\n" };
@@ -119,4 +151,10 @@ test("checks strict receipt correlation and does not disclose failure messages",
   assert.throws(() => decodeReceipt(wire(created), id, "create", { project_id: project, title: "Other title" }));
   assert.deepEqual(decodeReceipt(wire({ status: "denied", message: "/private/path" }), id, "create", {}), { status: "denied" });
   assert.deepEqual(decodeReceipt(wire({ status: "output_limit", message: "output" }), id, "update", {}), { status: "save_unconfirmed" });
+  const rename = { ...meta, status: "renamed", title: "Otro" };
+  const target = { project_id: project, note_id: note, title: rename.title };
+  assert.deepEqual(decodeReceipt(wire(rename), id, "rename", target), rename);
+  assert.deepEqual(decodeReceipt(wire({ status: "partial", message: "private path" }), id, "rename", target), { status: "partial" });
+  for (const wrong of [{ title: meta.title }, { status: "updated" }, { note_id: project }, { project_id: note }])
+    assert.throws(() => decodeReceipt(wire({ ...rename, ...wrong }), id, "rename", target));
 });
