@@ -11,7 +11,7 @@ import { expandedTool } from "../../blocks/expanded.ts";
 import { ReadGroups } from "../../blocks/groups.ts";
 import { familyMessage, registerBlocks } from "../../blocks/index.ts";
 import { literal, paint, paintCard } from "../../blocks/paint.ts";
-import { action, outcome } from "../../blocks/summary.ts";
+import { action, codemodeOutcome, outcome } from "../../blocks/summary.ts";
 import { formatMessage } from "../messages.ts";
 
 const text = (s: string) => ({ type: "text", text: s });
@@ -24,7 +24,7 @@ const theme: any = { style: (s: string) => s, colors:{}, appearance:"dark", getC
 const cli=process.env.SS_TEST_PI_CLI ?? process.env.STELA_TEST_PI_CLI;
 
 test("family identity remains independent of theme, outcome and grouping", () => {
-  assert.equal(FAMILIES.code[0],"");
+  assert.equal(FAMILIES.code[0],"</>");
   assert.notEqual(action("extension_unknown",{}).family,"code");
   assert.equal(result("read",{path:"fuente"},{},[text("missing")],true).family,"files");
 });
@@ -95,6 +95,39 @@ test("summary uses receipts, not guesses about counts, note titles, delivery, ca
   const receipt = result("ss_memory_save",{},{status:"saved"},[text('{"read_back":"unavailable","scope_changed":true,"write_paused":true}')]);
   assert.equal(receipt.level,"warn"); assert.match(receipt.notice,/Guardada.*relectura no confirmada.*Ámbito cambiado.*Escritura pausada/);
   assert.match(result("ss_memory_save",{},{status:"save_unconfirmed"},[],true).notice,/sin confirmar/);
+});
+
+test("Codemode distinguishes a zero-call script from missing call data and preserves the title across views", () => {
+  const base = action("codemode",{});
+  const failedHeader = text("Script failed\nWall time 0.1 seconds\nOutput:\n");
+  const render = (details: object, partial = false, failed = false, content = [text("example")]) => {
+    const value = {details,content};
+    const row = codemodeOutcome(outcome("codemode",base,value,partial,failed),value,partial,failed);
+    const folded = paint(draw,theme,row,80,0,"group").join("\n").trim();
+    const opened = expandedTool(draw,theme,{name:"codemode",row,args:{code:"text(1)"},result:value,partial,failed,durationMs:65,pad:0,grouped:()=>true}).render(80).join("\n");
+    assert.ok(opened.trimStart().startsWith("</> Codemode"));
+    assert.doesNotMatch(folded + opened,/0 acciones| · codemode/);
+    return [row,folded,opened] as const;
+  };
+  assert.equal(render({calls:[]},true)[1],"</> Codemode · … En curso");
+  assert.equal(render({calls:[]})[1],"</> Codemode · Script completado");
+  assert.match(render({calls:[]})[2],/Codemode · Script completado · 65 ms/);
+  assert.equal(render({calls:[]},false,true)[1],"</> Codemode · ✗ El script falló");
+  const notices = [
+    ["No codemode worker became free within 30 seconds. Retry after they finish.\n\nThe script did not start.","No se pudo iniciar"],
+    ["Script timed out: Execution timed out after 50 ms\n\nNo tool calls were made.","Tiempo agotado"],
+    ["Script aborted: Execution aborted\n\nThe script did not start.","Cancelado"],
+  ];
+  for (const [diagnostic, label] of notices) {
+    const content = [failedHeader,text("Script error:\n"+diagnostic)];
+    assert.equal(render({calls:[]},false,true,content)[0].notice,label);
+    assert.equal(render({calls:[]},false,false,content)[0].notice,"Script completado");
+  }
+  assert.equal(render({calls:[]},false,true,[failedHeader,text("arbitrary script output\nScript error:\n"+notices[2][0])])[0].notice,"El script falló");
+  assert.equal(render({})[1],"</> Codemode · Detalle no disponible");
+  assert.match(render({})[2],/Codemode · Detalle no disponible *\n/);
+  assert.equal(render({calls:[{name:"read"}]})[1],"</> Codemode · 1 acción");
+  assert.match(render({calls:[{name:"read"},{name:"write"}]})[2],/Codemode · 2 acciones · 65 ms/);
 });
 
 test("partials, warnings and error exit codes are distinct from successful reads", () => {

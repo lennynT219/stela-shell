@@ -53,6 +53,8 @@ export function paint(draw: Drawing, theme: Theme, row: Line, width: number, pad
   const top = single ? [frame(compose(title,"",""))] : [];
   if (size(full) <= room) return [...top,frame(full)];
   if (expanded) return [...top,...draw.wrapTextWithAnsi(full,room).map(frame)];
+  // Keep Codemode and its count together at narrow widths, without hiding failure/warning text.
+  if (row.family === "code" && notice) return [frame(compose(title,details,"")),frame(compose("","",notice))];
   if (!notice) return [...top,frame(full)];
 
   // In a cramped individual card the path/name can share the title line, leaving the whole second line for status.

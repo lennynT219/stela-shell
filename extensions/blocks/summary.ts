@@ -24,6 +24,26 @@ const labels: Record<string, string> = {
   DELIVERY_UNCONFIRMED: "Entrega sin confirmar", UNSUPPORTED_WORK_CONTEXT: "Destino incompatible", queued: "En cola", running: "En curso", cancelling: "Cancelación en curso", completed: "Terminada", failed: "Falló",
 };
 const named = (x: unknown) => typeof x === "string" && Object.hasOwn(labels,x) ? labels[x] : short(x,80);
+export const NO_CODEMODE_DETAIL = "Detalle no disponible";
+
+function scriptFailure(r: Result): string {
+  // Pi supplies an envelope and diagnostic; arbitrary script output is not a status.
+  const [header, diagnostic, ...rest] = r.content ?? [];
+  if (header?.type !== "text" || !/^Script failed\nWall time [\d.]+ seconds\nOutput:\n$/u.test(header.text ?? "") || diagnostic?.type !== "text" || rest.length) return "El script falló";
+  const message = diagnostic.text ?? "";
+  if (/^Script error:\nScript aborted: [^\n]+\n\n(?:The script did not start\.|No tool calls were made\.)$/u.test(message)) return "Cancelado";
+  if (/^Script error:\nScript timed out: Execution timed out after \d+ ms(?: while waiting for a free codemode worker)?\n\n(?:The script did not start\.|No tool calls were made\.)$/u.test(message)) return "Tiempo agotado";
+  if (/^Script error:\nNo codemode worker became free within \d+ seconds\.[^\n]*\n\nThe script did not start\.$/u.test(message)) return "No se pudo iniciar";
+  return "El script falló";
+}
+
+export function codemodeOutcome(row: Line, r: Result, partial: boolean, failed: boolean): Line {
+  const calls = field(r.details).calls;
+  if (!Array.isArray(calls)) return { ...row, subject: "", notice: partial ? "En curso" : NO_CODEMODE_DETAIL, level: partial ? "pending" : failed ? "error" : "ok" };
+  if (calls.length > 0) return { ...row, subject: plural(calls.length,"acción","acciones"), notice: failed ? "Falló la ejecución" : row.notice };
+  return { ...row, subject: "", notice: partial ? "En curso" : failed ? scriptFailure(r) : "Script completado" };
+}
+
 const textOf = (r: Result) => r.content?.find(c => c.type === "text")?.text ?? "";
 const messageOf = (r: Result) => short(textOf(r).split("\n",1)[0],100);
 const json = (r: Result) => { const s = textOf(r); if (s[0] === "{" && s.length <= 1024 * 1024) try { return field(JSON.parse(s)); } catch {} return {}; };

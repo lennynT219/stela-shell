@@ -5,13 +5,12 @@ import { expandedTool, expandedMessage } from "./expanded.ts";
 import { field, foldable, known, short, type Line, type Tool } from "./families.ts";
 import { ReadGroups } from "./groups.ts";
 import { empty, lineBlock, paintCard, type Drawing } from "./paint.ts";
-import { action, imageOutput, outcome, peerName } from "./summary.ts";
+import { action, codemodeOutcome, imageOutput, outcome, peerName } from "./summary.ts";
 
 const STATE = Symbol("ss block render state");
 type Context = Parameters<NonNullable<ToolDefinition["renderCall"]>>[2];
 interface Local { hasResult?: boolean }
 const local = (c: Context): Local => c.state[STATE] ??= {};
-const actionCount = (n: number) => `${n} ${n === 1 ? "acción" : "acciones"}`;
 function toolView(name: Tool, draw: Drawing, groups: ReadGroups, batches: Batches): ToolRenderers {
   const layout = name === "codemode" ? "group" : "individual";
   return { renderShell: "self",
@@ -19,7 +18,7 @@ function toolView(name: Tool, draw: Drawing, groups: ReadGroups, batches: Batche
       const state = local(c), base = action(name,args);
       groups.bind(c.toolCallId,name,c.expanded,c.invalidate);
       if (!c.isPartial || state.hasResult) return empty;
-      const row: Line={...base,level:"pending",notice:"Pendiente"};
+      const row: Line={...base,level:"pending",notice:name==="codemode" ? "En curso" : "Pendiente"};
       const pending = c.expanded ? expandedTool(draw,theme,{name,args,row,partial:true,pad:c.outputPad,grouped:()=>name==="codemode"})
         : {render:(w:number)=>paintCard(draw,theme,[row],w,c.outputPad,layout),invalidate(){}};
       // Pi mounts both slots. Once the first partial/final result arrives, it owns the entire card.
@@ -27,31 +26,34 @@ function toolView(name: Tool, draw: Drawing, groups: ReadGroups, batches: Batche
     },
     renderResult(result, opts, theme, c) {
       const state = local(c); state.hasResult = true;
-      const base = action(name,c.args), row = outcome(name,base,result,opts.isPartial,c.isError);
+      const base = action(name,c.args);
+      let row = outcome(name,base,result,opts.isPartial,c.isError);
+      const failed = Boolean(c.isError || result.isError);
       const hasImage = imageOutput(result);
-      if (hasImage) {
-        if (!c.showImages || draw.getCapabilities?.().images === null) row.notice = [row.notice,"Imagen adjunta · no visible aquí"].filter(Boolean).join(" · ");
-        else row.notice ||= "Imagen adjunta";
-      }
       const canGroup = foldable(name) && !opts.isPartial && row.level === "ok" && !hasImage;
       groups.mark(c.toolCallId,name,canGroup);
       let children: BatchLine[] | undefined;
       if (name === "codemode") {
         const d = field(result.details);
-        if (Array.isArray(d.calls)) row.verb = actionCount(d.calls.length);
+        row = codemodeOutcome(row,result,opts.isPartial,failed);
         children = batchLines(d,batches.facts(c.toolCallId),c.expanded,opts.isPartial ? undefined : hasImage);
-        if (c.isError && Array.isArray(d.calls)) row.notice = "Falló la ejecución";
-        else if (!opts.isPartial && children.some(s => s.level === "error" || s.level === "warn")) { row.level = "warn"; row.notice = "Revisar resultados"; }
-        const texts = result.content.filter(p => p.type === "text");
-        if (d.fullOutputPath || texts.some(p => /(?:^|\n)Warning: truncated output \(original token count:/.test(p.text))) {
-          row.level = row.level === "error" ? "error" : "warn"; row.notice = [row.notice,"Salida parcial"].filter(Boolean).join(" · ");
-        }
-        if (texts.some(p => p.text.includes("that the script did not show. Show each image block"))) {
-          row.level = row.level === "error" ? "error" : "warn"; row.notice = [row.notice,"Imagen no mostrada"].filter(Boolean).join(" · ");
+        if (Array.isArray(d.calls)) {
+          if (!failed && !opts.isPartial && children.some(s => s.level === "error" || s.level === "warn")) { row.level = "warn"; row.notice = "Revisar resultados"; }
+          const texts = result.content.filter(p => p.type === "text");
+          if (d.fullOutputPath || texts.some(p => /(?:^|\n)Warning: truncated output \(original token count:/.test(p.text))) {
+            row.level = row.level === "error" ? "error" : "warn"; row.notice = [row.notice,"Salida parcial"].filter(Boolean).join(" · ");
+          }
+          if (texts.some(p => p.text.includes("that the script did not show. Show each image block"))) {
+            row.level = row.level === "error" ? "error" : "warn"; row.notice = [row.notice,"Imagen no mostrada"].filter(Boolean).join(" · ");
+          }
         }
       }
+      if (hasImage && (name !== "codemode" || Array.isArray(field(result.details).calls))) {
+        if (!c.showImages || draw.getCapabilities?.().images === null) row.notice = [row.notice,"Imagen adjunta · no visible aquí"].filter(Boolean).join(" · ");
+        else row.notice ||= "Imagen adjunta";
+      }
       const grouped=()=>name==="codemode" || (canGroup && groups.grouped(c.toolCallId));
-      if (c.expanded) return expandedTool(draw,theme,{name,args:c.args,row,result,children,partial:opts.isPartial,failed:c.isError,durationMs:c.durationMs,pad:c.outputPad,grouped});
+      if (c.expanded) return expandedTool(draw,theme,{name,args:c.args,row,result,children,partial:opts.isPartial,failed,durationMs:c.durationMs,pad:c.outputPad,grouped});
       const rows=children?[row,...children]:[row];
       const summary: Component = { render(w) {
         const count = canGroup && !c.expanded ? groups.count(c.toolCallId) : 1;

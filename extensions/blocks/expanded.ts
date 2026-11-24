@@ -4,6 +4,7 @@ import { FAMILIES, field, short, type Family, type Line, type Tool } from "./fam
 import type { BatchLine } from "./batches.ts";
 import { literal, padCard, type Drawing } from "./paint.ts";
 import { cardPalette } from "./palette.ts";
+import { NO_CODEMODE_DETAIL } from "./summary.ts";
 
 interface Band { text: string; role?: "title" | "label" | "warn" | "error" | "added"; family?: Family; tail?: string; inset?: boolean; language?: string }
 interface DisplayResult { content: readonly { type: string; text?: string }[]; details?: unknown }
@@ -71,7 +72,8 @@ function section(bands: Band[], label: string, value: string, extra: Partial<Ban
   bands.push({text:label,role:"label"},{text:value,inset:true,...extra});
 }
 function heading(row: Line, identity?: string, suffix?: string): Band {
-  return {text:title(row),role:"title",family:row.family,tail:joined([row.verb!==identity?identity:"",suffix])};
+  const same = row.verb === identity || (row.verb === "Codemode" && identity === "codemode");
+  return {text:title(row),role:"title",family:row.family,tail:joined([same ? "" : identity,suffix])};
 }
 function status(bands: Band[], row: Line, subject: string, notice=row.notice) {
   const text=joined([subject,[flag(row),notice].filter(Boolean).join(" ")]);
@@ -107,10 +109,12 @@ interface ToolDetail {
 }
 export function expandedTool(draw: Drawing, theme: Theme, v: ToolDetail): Component {
   const {name,row,result}=v, args=field(v.args), d=field(result?.details);
-  const bands: Band[]=[heading(row,name,v.partial ? "" : duration(v.durationMs))];
+  const code = name === "codemode", inlineNotice = code && row.level === "ok" ? row.notice : "";
+  const elapsed = v.partial || (code && row.notice === NO_CODEMODE_DETAIL) ? "" : duration(v.durationMs);
+  const bands: Band[]=[heading(row,name,joined([code ? row.subject : "",inlineNotice,elapsed]))];
   // Don't repeat a shell command (possibly a whole script) or path preview above its input.
   const isInput = [args.path,args.file_path,args.command,args.query,args.title,args.label].some(s=>typeof s === "string" && (row.subject === short(s) || row.subject === short(s,90)));
-  status(bands,row,isInput ? "" : row.subject);
+  if (!inlineNotice) status(bands,row,code || isInput ? "" : row.subject);
   if (v.children) batchDetails(bands,v.children);
   input(bands,name,args,draw);
   if (result) {

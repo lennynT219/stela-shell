@@ -32,7 +32,7 @@ class Term:
             stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         os.close(slave)
 
-    def resize(self, width, height=100):
+    def resize(self, width, height=120):
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))
         if hasattr(self, 'p'): self.p.send_signal(signal.SIGWINCH)
 
@@ -120,26 +120,27 @@ def verify_fold(raw, native, narrow=False):
     ansi = raw.splitlines()
     text = '\n'.join(lines)
     assert text.count('📄 Leer ×2') == 2, text  # One direct group plus one inside an actual script.
-    for s in ['✗', 'Parcial', 'Permiso denegado','anterior.txt · Escrito','Falló la ejecución','Guardado sin confirmar','Sin guardar']:
+    for s in ['✗', 'Parcial', 'Permiso denegado','anterior.txt · Escrito','</> Codemode · 1 acción','Falló la ejecución','</> Codemode · Script completado','</> Codemode · ✗ El script falló','</> Codemode · ✗ Tiempo agotado','Guardado sin confirmar','Sin guardar']:
         assert s in text, (s,text)
     assert 'CONTENIDO_NOTA_INTERNO' not in text and 'SALIDA_FILTRADA' not in text and 'await tools.' not in text
-    assert '{} Lote' not in text and 'Falló el lote' not in text
-    tag = next(i for i,s in enumerate(lines) if s.lstrip().startswith('6 acciones'))
+    assert '{} Lote' not in text and 'Falló el lote' not in text and '0 acciones' not in text
+    tag = next(i for i,s in enumerate(lines) if s.lstrip().startswith('</> Codemode · 6 acciones'))
+    first_child = tag+1 if 'Revisar resultados' in lines[tag] else tag+2
+    if first_child != tag+1: assert lines[tag+1].strip()=='! Revisar resultados'
     margin = len(lines[tag]) - len(lines[tag].lstrip())
     yellow, = set(colors(ansi[tag],48)); near_native(yellow)
     assert min(yellow[:2]) > yellow[2] and yellow != (255,212,0), (yellow,native)
     # Five visible child rows after the header, even when one contains a denial. Titles keep their family ink.
     families = ['header','files','files','knowledge','web','files']; inks = {}
-    for off,family in enumerate(families):
-        i=tag+off
-        assert len(lines[i])-len(lines[i].lstrip())==margin and '│' not in lines[i], lines[tag:tag+6]
+    for i,family in zip([tag,*range(first_child,first_child+5)],families):
+        assert len(lines[i])-len(lines[i].lstrip())==margin and '│' not in lines[i], lines[tag:first_child+5]
         assert yellow in colors(ansi[i],48), (i,repr(ansi[i]))
         ink = colors(ansi[i],38)[0]
         assert inks.setdefault(family,ink)==ink
     if truecolor: assert len(set(inks.values()))==len(inks)
-    verify_padding(ansi,tag,tag+5,yellow)  # No blank rows between the five child entries.
-    assert lines[tag+1].strip()=='📄 Leer ×2' and 'Parcial' in lines[tag+4] and 'Permiso denegado' in lines[tag+5]
-    direct = next(i for i,s in enumerate(lines) if s.strip()=='📄 Leer ×2' and i!=tag+1)
+    verify_padding(ansi,tag,first_child+4,yellow)  # No blank rows between the five child entries.
+    assert lines[first_child].strip()=='📄 Leer ×2' and 'Parcial' in lines[first_child+3] and 'Permiso denegado' in lines[first_child+4]
+    direct = next(i for i,s in enumerate(lines) if s.strip()=='📄 Leer ×2' and i!=first_child)
     assert yellow in colors(ansi[direct],48)
     verify_padding(ansi,direct,direct,yellow)
     fills = {}
@@ -189,7 +190,9 @@ def verify_expanded(raw, folded):
         raise AssertionError('missing expanded '+header+'\n'+'\n'.join(words(l) for l in lines)[-8500:])
     read=block('📄 Leer · read','📄 Leer ×2','TEXTO_ALFA'); assert 'Entrada' in read and 'Resultado' in read
     assert 'TEXTO_BETA' in block('📄 Leer · read','📄 Leer ×2','TEXTO_BETA')
-    batch=block('6 acciones · codemode','6 acciones'); assert batch.count('6 acciones')==1
+    batch=block('</> Codemode · 6 acciones','</> Codemode · 6 acciones'); assert batch.count('</> Codemode')==batch.count('6 acciones')==1
+    script=block('</> Codemode · Script completado','</> Codemode · Script completado'); assert '\nSalida\nSCRIPT_SIN_HERRAMIENTAS' in script
+    assert '0 acciones' not in '\n'.join(words(l) for l in lines)
     assert batch.count('📄 Leer · read')==3 and batch.count('📄 Escribir · write')==1,batch
     assert '✓ read {' not in batch and '\ncodemode\n' not in batch and all(s in batch for s in ['Permiso denegado','Código','Salida','SALIDA_FILTRADA']),batch
     assert batch.index('📄 Leer') < batch.index('\nCódigo\n') < batch.index('\nSalida\n')

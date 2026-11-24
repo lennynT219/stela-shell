@@ -65,6 +65,9 @@ export default function fixture(pi: ExtensionAPI) {
           case 5: tool("uncertain","ss_memory_save",{reason:"Motivo del ensayo"});tool("image","ss_images_generate",{});break;
           case 6: tool("shell","bash",{command:"printf 'RESULTADO_%s\\n' TERMINAL",timeout:5});break;
           case 7: tool("edit","edit",{path:"cambio.txt",edits:[{oldText:"texto antiguo",newText:"texto nuevo"}]});break;
+          case 8: tool("script-only","codemode",{code:"store('example',2); text('SCRIPT_SIN_HERRAMIENTAS')"});break;
+          case 9: tool("failed-script","codemode",{code:"throw new Error('ERROR_SIN_HERRAMIENTAS')"});break;
+          case 10: tool("timeout-script","codemode",{code:'// @options: {"timeout_ms": 200}\nwhile (true) {}'});break;
           default: content.push({type:"text",text:"FIN_DE_BLOQUES"});
         }
         const stopReason = content[0].type==="toolCall"?"toolUse":"stop";

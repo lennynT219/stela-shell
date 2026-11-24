@@ -3,12 +3,12 @@ export const FAMILIES = {
   // Icon and OKHSL hue only. Pi's active theme supplies the strength of the panels and lettering.
   memory: ["🧠", 295], knowledge: ["📚", 232], web: ["🌐", 202], sessions: ["💬", 158],
   tasks: ["🧩", 52], images: ["🖼", 337], files: ["📄", 235], terminal: [">_", 126],
-  code: ["", 96], other: ["", 229],
+  code: ["</>", 96], other: ["", 229],
 } as const;
 export type Family = keyof typeof FAMILIES;
 export const TOOLS = {
   read: ["files", "Leer"], edit: ["files", "Editar"], write: ["files", "Escribir"], bash: ["terminal", "Ejecutar"],
-  codemode: ["code", "Acciones"], ss_memory_read: ["memory", "Leer"], ss_memory_save: ["memory", "Guardar"],
+  codemode: ["code", "Codemode"], ss_memory_read: ["memory", "Leer"], ss_memory_save: ["memory", "Guardar"],
   ss_knowledge_sources: ["knowledge", "Fuentes"], ss_knowledge_list: ["knowledge", "Listar"],
   ss_knowledge_read: ["knowledge", "Leer"], ss_knowledge_create: ["knowledge", "Crear"], ss_knowledge_update: ["knowledge", "Actualizar"],
   ss_knowledge_rename: ["knowledge", "Renombrar"],
