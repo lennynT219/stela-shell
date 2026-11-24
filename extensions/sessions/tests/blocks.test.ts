@@ -10,7 +10,7 @@ import { cardPalette } from "../../blocks/palette.ts";
 import { expandedTool } from "../../blocks/expanded.ts";
 import { ReadGroups } from "../../blocks/groups.ts";
 import { familyMessage, registerBlocks } from "../../blocks/index.ts";
-import { literal, paint } from "../../blocks/paint.ts";
+import { literal, paint, paintCard } from "../../blocks/paint.ts";
 import { action, outcome } from "../../blocks/summary.ts";
 import { formatMessage } from "../messages.ts";
 
@@ -183,6 +183,16 @@ test("individuals take two lines and grouped members one, aligned without a rail
   assert.deepEqual(paint(draw,theme,note,80,1,"group").map(s=>s.trimEnd()),[" 📚 Leer · Arquitectura"]);
 });
 
+test("card padding uses the full surface width once per group, but does not create empty cards", () => {
+  const rows=[action("read",{path:"uno"}),action("ss_web_search",{query:"ejemplo"})];
+  for (const width of [1,38,116]) {
+    const frame=paintCard(draw,theme,rows,width,1,"group");
+    assert.deepEqual(frame,[" ".repeat(width), ...rows.flatMap(row=>paint(draw,theme,row,width,1,"group")), " ".repeat(width)]);
+  }
+  assert.deepEqual(paintCard(draw,theme,[],38,1,"group"),[]);
+  assert.deepEqual(paintCard(draw,theme,rows,0,1,"group"),[]);
+});
+
 test("registers presentation only, preserving unknown renderers and the executable surface", () => {
   let resolve: Function | undefined;
   registerBlocks({on:()=>{},registerToolRenderer: (r:Function)=>{resolve=r;}} as any,draw);
@@ -190,9 +200,10 @@ test("registers presentation only, preserving unknown renderers and the executab
   const renderer=resolve!("read",()=>undefined), args=Object.freeze({path:"estación"});
   const ctx={args,toolCallId:"x",state:{},isPartial:true,isError:false,expanded:false,showImages:true,outputPad:1};
   const pending=renderer.renderCall(args,theme,ctx);
-  assert.deepEqual(pending.render(40).map((s:string)=>s.trim()),["📄 Leer","estación · … Pendiente"]);
+  assert.deepEqual(pending.render(40).map((s:string)=>s.trim()),["","📄 Leer","estación · … Pendiente",""]);
   const out=Object.freeze({content:[text("detalles privados de la prueba")],details:{}});
   assert.doesNotMatch(renderer.renderResult(out,{isPartial:false},theme,{...ctx,isPartial:false}).render(40).join(""),/privados/);
+  assert.deepEqual(pending.render(40),[],"a replaced pending slot must not leave any padding");
   assert.match(renderer.renderResult(out,{isPartial:true},theme,{...ctx,expanded:true}).render(80).join(""),/detalles privados/);
 });
 
@@ -209,7 +220,8 @@ test("expansion has one title before input and output, not a second native card 
     const call=tool.renderCall(args,theme,ctx);
     const result=tool.renderResult({content:data,details:{}},{expanded:true,isPartial:false},theme,ctx);
     const lines=[...call.render(86),...result.render(86)].map(s=>s.trim());
-    assert.ok(lines[0].startsWith(first) && lines[0].includes(name),lines.join("\n"));
+    assert.equal(lines[0],""); assert.equal(lines.at(-1),"");
+    assert.ok(lines[1].startsWith(first) && lines[1].includes(name),lines.join("\n"));
     assert.ok(!lines.includes("SEGUNDA CABECERA"));
     assert.equal(lines.filter(l=>l.startsWith(first)).length,1);
     const entry=lines.indexOf(section), end=lines.findIndex(l=>l==="Salida" || l==="Resultado");

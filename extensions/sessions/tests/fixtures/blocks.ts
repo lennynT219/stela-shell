@@ -31,7 +31,7 @@ export default function fixture(pi: ExtensionAPI) {
   pi.registerShortcut("f8", { description:"Snapshot of the disposable terminal", handler: async ctx => {
     const file=process.env.SS_BLOCK_FRAME!;
     const theme=ctx.ui.theme;
-    const native = {name:theme.name, appearance:theme.appearance, mode:theme.getColorMode(), panel:theme.getBgAnsi("toolSuccessBg")};
+    const native = {name:theme.name, appearance:theme.appearance, mode:theme.getColorMode(), panel:theme.getBgAnsi("toolSuccessBg"), user:theme.getBgAnsi("userMessageBg")};
     writeFileSync(file+".tmp",JSON.stringify({ lines: screen.getScreenLines(), draft: ctx.ui.getEditorText(), native })); renameSync(file+".tmp",file);
   } });
   pi.registerProvider("ss-blocks",{ baseUrl:"http://127.0.0.1:1/unused", apiKey:"test-only", api:"ss-blocks-api",

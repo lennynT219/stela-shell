@@ -4,7 +4,7 @@ import { Batches, batchLines, type BatchLine } from "./batches.ts";
 import { expandedTool, expandedMessage } from "./expanded.ts";
 import { field, foldable, known, short, type Line, type Tool } from "./families.ts";
 import { ReadGroups } from "./groups.ts";
-import { empty, lineBlock, paint, type Drawing } from "./paint.ts";
+import { empty, lineBlock, paintCard, type Drawing } from "./paint.ts";
 import { action, imageOutput, outcome, peerName } from "./summary.ts";
 
 const STATE = Symbol("ss block render state");
@@ -21,7 +21,7 @@ function toolView(name: Tool, draw: Drawing, groups: ReadGroups, batches: Batche
       if (!c.isPartial || state.hasResult) return empty;
       const row: Line={...base,level:"pending",notice:"Pendiente"};
       const pending = c.expanded ? expandedTool(draw,theme,{name,args,row,partial:true,pad:c.outputPad,grouped:()=>name==="codemode"})
-        : {render:(w:number)=>paint(draw,theme,row,w,c.outputPad,layout),invalidate(){}};
+        : {render:(w:number)=>paintCard(draw,theme,[row],w,c.outputPad,layout),invalidate(){}};
       // Pi mounts both slots. Once the first partial/final result arrives, it owns the entire card.
       return {render:w=>state.hasResult?[]:pending.render(w), invalidate:()=>pending.invalidate()};
     },
@@ -56,8 +56,8 @@ function toolView(name: Tool, draw: Drawing, groups: ReadGroups, batches: Batche
       const summary: Component = { render(w) {
         const count = canGroup && !c.expanded ? groups.count(c.toolCallId) : 1;
         if (!count) return [];
-        if (count > 1) return paint(draw,theme,{ ...row, subject: `×${count}`, notice: "" },w,c.outputPad,"group");
-        return rows.flatMap(r => paint(draw,theme,r,w,c.outputPad,grouped()?"group":layout));
+        if (count > 1) return paintCard(draw,theme,[{ ...row, subject: `×${count}`, notice: "" }],w,c.outputPad,"group");
+        return paintCard(draw,theme,rows,w,c.outputPad,grouped()?"group":layout);
       }, invalidate() {} };
       return summary;
     },

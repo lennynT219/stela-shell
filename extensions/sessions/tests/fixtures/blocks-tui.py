@@ -38,8 +38,8 @@ class Term:
 
     def send(self, key): os.write(self.fd, key)
 
-    def click_row(self, raw, prefix):
-        y=next(i+1 for i,s in enumerate(raw.splitlines()) if ANSI.sub('',s).strip().startswith(prefix))
+    def click_row(self, raw, prefix, offset=0):
+        y=next(i+1 for i,s in enumerate(raw.splitlines()) if ANSI.sub('',s).strip().startswith(prefix))+offset
         for suffix in ('M','m'): self.send(f'\x1b[<0;4;{y}{suffix}'.encode())
 
     def drain(self, timeout=.025):
@@ -99,6 +99,14 @@ def set_theme(profile, name):
     settings.write_text(json.dumps({**values, 'theme':name}))
 
 
+def verify_padding(ansi, first, last, fill):
+    for i in (first-1, last+1):
+        assert 0 <= i < len(ansi) and not ANSI.sub('',ansi[i]).strip() and set(colors(ansi[i],48))=={fill}, (i,repr(ansi[i]))
+    for i in (first-2, last+2):
+        if 0 <= i < len(ansi) and not ANSI.sub('',ansi[i]).strip():
+            assert fill not in colors(ansi[i],48), (i,repr(ansi[i]))
+
+
 def verify_fold(raw, native, narrow=False):
     truecolor = native['mode']=='truecolor'
     reference = colors(native['panel'],48)
@@ -129,9 +137,11 @@ def verify_fold(raw, native, narrow=False):
         ink = colors(ansi[i],38)[0]
         assert inks.setdefault(family,ink)==ink
     if truecolor: assert len(set(inks.values()))==len(inks)
-    assert yellow not in colors(ansi[tag+6],48), 'a child wrapped into a second yellow line'
+    verify_padding(ansi,tag,tag+5,yellow)  # No blank rows between the five child entries.
     assert lines[tag+1].strip()=='📄 Leer ×2' and 'Parcial' in lines[tag+4] and 'Permiso denegado' in lines[tag+5]
-    assert all(yellow in colors(ansi[i],48) for i,s in enumerate(lines) if s.strip()=='📄 Leer ×2')
+    direct = next(i for i,s in enumerate(lines) if s.strip()=='📄 Leer ×2' and i!=tag+1)
+    assert yellow in colors(ansi[direct],48)
+    verify_padding(ansi,direct,direct,yellow)
     fills = {}
     for title,detail,family in [('📚 Listar','1 nota','knowledge'),('📚 Actualizar','Árbol de diseño · Actualizada','knowledge'),('🖼 Generar','vista 1 · Sin guardar','images'),('🧠 Guardar','! Guardado sin confirmar','memory')]:
         i = next(i for i,line in enumerate(lines) if line.strip()==title)
@@ -139,7 +149,7 @@ def verify_fold(raw, native, narrow=False):
         ink=colors(ansi[i],38)[0]; assert inks.setdefault(family,ink)==ink
         fill, = set(colors(ansi[i],48)); near_native(fill)
         assert fills.setdefault(family,fill)==fill and fill in colors(ansi[i+1],48)
-        if not lines[i+2].strip(): assert fill not in colors(ansi[i+2],48), title+' should occupy two rows'
+        verify_padding(ansi,i,i+1,fill)
     if truecolor:
         assert len(set(fills.values()))==3
         r,g,b=fills['knowledge']; assert b>g>r
@@ -161,9 +171,10 @@ def verify_expanded(raw, folded):
             j=i+1
             # A blank unpainted line separates Pi tool components. Blank content lines inside the card keep its fill.
             while j<len(lines) and (words(lines[j]) or colors(lines[j],48)): j+=1
-            part=lines[i:j]; text='\n'.join(words(l) for l in part)
+            part=lines[i:j]; text='\n'.join(words(l) for l in part).rstrip()
             if contains and contains not in text: continue
             expected=surface(old_title)
+            verify_padding(lines,i,j-2,expected)
             for l in part:
                 assert set(colors(l,48))=={expected},(header,repr(l),expected)
                 # A reset in the middle of a styled source line must not uncover any following text.
@@ -198,11 +209,15 @@ with workspace() as (root, profile):
         t.output('[Extensions]'); t.send(b'\x1b[200~probar\x1b[201~\r')
         t.output('¿Autorizar lectura en la prueba?'); t.send(b'\x1b'); t.output('FIN_DE_BLOQUES')
         raw,_,_=t.snapshot(lambda s:'FIN_DE_BLOQUES' in s,'final folded frame'); assert t.native['name']=='dark'; verify_fold(raw,t.native)
+        user_ink, = colors(t.native['user'],48)
+        ansi = raw.splitlines()
+        sent = next(i for i,s in enumerate(ansi) if ANSI.sub('',s).strip()=='probar')
+        verify_padding(ansi,sent,sent,user_ink)  # Compare to the sent message in the same actual frame.
         assert b'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB' in t.log and b'\x1b_G' in t.log, 'missing native Kitty transmission of the fixture PNG'
         assert (root/'lote.txt').read_text()=='OK' and (root/'anterior.txt').read_text()=='SE CONSERVA' and not (root/'no.txt').exists()
         calls_path=Path(str(t.frame)+'.calls'); calls=calls_path.read_bytes(); assert calls.splitlines().count(b'write')==2
         # Click only the direct group's leader: its still-folded sibling becomes visible but neither changes color.
-        t.click_row(raw,'📄 Leer ×2'); clicked,_,_=t.snapshot(lambda s:'TEXTO_ALFA' in s and 'TEXTO_BETA' not in s,'open one direct read by mouse')
+        t.click_row(raw,'📄 Leer ×2',offset=-1); clicked,_,_=t.snapshot(lambda s:'TEXTO_ALFA' in s and 'TEXTO_BETA' not in s,'open one direct read by mouse')
         yellow=next(colors(l,48)[0] for l in raw.splitlines() if ANSI.sub('',l).strip()=='📄 Leer ×2')
         for marker in ['TEXTO_ALFA','📄 Leer · b.txt']:
             assert any(marker in ANSI.sub('',l) and yellow in colors(l,48) for l in clicked.splitlines()),marker

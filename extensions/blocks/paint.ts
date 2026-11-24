@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
+import type { Color, Component } from "@earendil-works/pi-tui";
 import { FAMILIES, type Line } from "./families.ts";
 import { cardPalette, type ColorTools } from "./palette.ts";
 
@@ -22,7 +22,7 @@ const brief = new Map(Object.entries({
   "Sin detalle del resultado": "Sin detalle", "Resultado no confirmado": "Sin confirmar",
 }));
 
-/** Folded heights are exact: two lines per card, one per member of a yellow group. Only expansion can wrap. */
+/** Folded content has two lines per card or one per group member. Only expansion can wrap. */
 export function paint(draw: Drawing, theme: Theme, row: Line, width: number, pad = 0, layout: CardLayout = "individual", expanded = false): string[] {
   if (width < 1) return [];
   const palette = cardPalette(theme,draw);
@@ -78,6 +78,20 @@ export function paint(draw: Drawing, theme: Theme, row: Line, width: number, pad
   const subject = !single && spare >= 2 ? clip(details,spare) : "";
   return [...top,frame(compose(label,subject,status))];
 }
-export const lineBlock = (draw: Drawing, theme: Theme, row: Line, pad = 0, expanded = false): Component => ({ render: w => paint(draw,theme,row,w,pad,"individual",expanded), invalidate() {} });
+/** Like a sent message in Pi: one painted row at either edge of a visible card, not of each member. */
+export function padCard(theme: Theme, bg: Color, width: number, lines: string[]): string[] {
+  if (width < 1 || !lines.length) return lines;
+  const edge = theme.style(" ".repeat(width), { bg });
+  return [edge, ...lines, edge];
+}
+
+export function paintCard(draw: Drawing, theme: Theme, rows: readonly Line[], width: number, pad: number,
+  layout: CardLayout = "individual", expanded = false): string[] {
+  if (width < 1 || !rows.length) return [];
+  const bg = cardPalette(theme,draw).families[layout === "group" ? "code" : rows[0].family].bg;
+  return padCard(theme,bg,width,rows.flatMap(row => paint(draw,theme,row,width,pad,layout,expanded)));
+}
+
+export const lineBlock = (draw: Drawing, theme: Theme, row: Line, pad = 0, expanded = false): Component => ({ render: w => paintCard(draw,theme,[row],w,pad,"individual",expanded), invalidate() {} });
 // Bidi/control bytes in persisted messages/results are not terminal instructions. Keep paragraph structure in expanded text.
 export function literal(s: string) { return s.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu,c => [...c].map(k => `\\u{${k.codePointAt(0)!.toString(16)}}`).join("")); }

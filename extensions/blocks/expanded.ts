@@ -2,7 +2,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { FAMILIES, field, short, type Family, type Line, type Tool } from "./families.ts";
 import type { BatchLine } from "./batches.ts";
-import { literal, type Drawing } from "./paint.ts";
+import { literal, padCard, type Drawing } from "./paint.ts";
 import { cardPalette } from "./palette.ts";
 
 interface Band { text: string; role?: "title" | "label" | "warn" | "error" | "added"; family?: Family; tail?: string; inset?: boolean; language?: string }
@@ -62,7 +62,8 @@ function sheet(draw: Drawing, theme: Theme, family: Family, pad: number, grouped
         }
       }
     }
-    cache={width,fill,colors,lines}; return lines;
+    const framed=padCard(theme,bg,width,lines);
+    cache={width,fill,colors,lines:framed}; return framed;
   } };
 }
 function section(bands: Band[], label: string, value: string, extra: Partial<Band> = {}) {
