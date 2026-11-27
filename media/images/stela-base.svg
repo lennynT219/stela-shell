@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"
+     color="#FEC90A" role="img" aria-labelledby="stela-titulo stela-descripcion" xml:lang="es">
+  <title id="stela-titulo">Stela en reposo</title>
+  <desc id="stela-descripcion">Cinco placas amarillas, anchas y redondeadas, envuelven un núcleo azul índigo en espiral. En el centro, Stela tiene el rostro oscuro, los ojos amarillos abiertos y una sonrisa.</desc>
+
+  <!-- Modelo: la expresión superior izquierda de la hoja ilustrada de Stela. -->
+  <g id="stela-cuerpo">
+    <!-- El núcleo pasa por detrás de las cinco placas. La franja azul visible no es un trazo. -->
+    <path id="stela-nucleo" fill="#372F8C" d="M77 76.5
+      Q116 48 161.5 68.5 Q203 92 199 145.5 Q189 193 136.5 204
+      Q91 211 60 163 Q42 117 77 76.5Z"/>
+
+    <!-- Las placas no son copias rotadas: mantienen la anchura y la inclinación de cada pala. -->
+    <g id="stela-corona" fill="currentColor">
+      <path id="stela-placa-norte" d="M75 107
+        C73.8 78.9 85.6 52 106 32.5 C115.9 24.4 129.6 15.2 143 17
+        C167.9 19.3 165.1 52.2 161.5 68.5 C127.7 61.5 92.4 77.4 75 107Z"/>
+      <path id="stela-placa-este" d="M127.5 82
+        C142 72.6 159.2 67.9 176 69 C201.7 70.4 236.9 88.5 239 116.5
+        C239.3 136.5 214.5 143.5 199 145.5 C194.7 110.3 162.5 81.8 127.5 82Z"/>
+      <path id="stela-placa-sureste" d="M178 122
+        C195.4 135.6 207.1 157.6 206.5 179 C206.9 200.1 194.9 237.2 170 239.5
+        C151.2 239.8 143.2 217.7 136.5 204 C170.7 193.1 188.2 153.7 178 122Z"/>
+      <path id="stela-placa-suroeste" d="M157 177
+        C146.4 198.1 128.2 210.6 107 219.5 C86.6 226.9 51.3 233.2 38 210
+        C30.1 191.5 48.3 173.9 60 163 C82.8 191.8 125.9 195.9 157 177Z"/>
+      <path id="stela-placa-oeste" d="M90.5 172
+        C63.6 167.4 41.3 150.7 28.5 129 C18.1 113 9.8 86.1 26 71
+        C40.3 59.3 62.4 69.5 77 76.5 C56.3 106.5 65.3 148 90.5 172Z"/>
+    </g>
+
+    <!-- Cantos interiores: un solo tono de sombra; sin contorno exterior ni destellos. -->
+    <g id="stela-pliegues" fill="#E8AE10">
+      <path d="M161.5 68.5 C127.7 61.5 92.4 77.4 75 107 C89.6 72.3 126.7 54.5 161.5 68.5Z"/>
+      <path d="M199 145.5 C194.7 110.3 162.5 81.8 127.5 82 C166.2 77.6 200 106.9 199 145.5Z"/>
+      <path d="M136.5 204 C170.7 193.1 188.2 153.7 178 122 C193.7 155.7 176.1 196.4 136.5 204Z"/>
+      <path d="M60 163 C82.8 191.8 125.9 195.9 157 177 C125.3 201.9 80.9 197.1 60 163Z"/>
+      <path d="M77 76.5 C56.3 106.5 65.3 148 90.5 172 C59.4 149.7 50.3 106.6 77 76.5Z"/>
+    </g>
+  </g>
+
+  <g id="stela-rostro">
+    <ellipse id="stela-cara" cx="126.5" cy="133.6" rx="43.6" ry="43.1" fill="#2B2C33"/>
+    <g id="stela-ojos" fill="currentColor">
+      <ellipse cx="108" cy="124" rx="6.5" ry="11.5"/>
+      <ellipse cx="145" cy="124" rx="6.5" ry="11.5"/>
+    </g>
+    <path id="stela-boca" d="M115.6 148.7 C119.3 156.5 133.4 156.9 137.2 148.7"
+          fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>

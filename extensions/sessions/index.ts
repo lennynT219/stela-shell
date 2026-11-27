@@ -257,7 +257,7 @@ export default async function sessions(pi: ExtensionAPI): Promise<void> {
   const { registerBlocks, familyMessage } = await import("../blocks/index.ts");
   registerBlocks(pi,{ ...drawing, highlightCode, getLanguageFromPath });
   registerWriteScope(pi, getAgentDir);
-  registerUsageFooter(pi, truncateToWidth, registerSpeed(pi, readStoredCredential));
+  const caption = registerUsageFooter(pi, truncateToWidth, registerSpeed(pi, readStoredCredential));
   registerCommandSearch(pi);
   registerTurnHint(pi, CustomEditor, action => drawing.getKeybindings().getKeys(action), truncateToWidth);
   const { registerActivity } = await import("./activity.ts");
@@ -265,6 +265,6 @@ export default async function sessions(pi: ExtensionAPI): Promise<void> {
     c => c instanceof ExtensionSelectorComponent || c instanceof ExtensionInputComponent || c instanceof ExtensionEditorComponent,
     undefined, (signal, ctx) => ctx.model?.provider === "openai-codex" ? readPiQuota(ctx, readStoredCredential, signal) : readCodexQuota(signal));
   const { registerPanelEditor } = await import("./panel-editor.ts");
-  registerPanelEditor(pi, CustomEditor, drawing, panel.toggle);
+  registerPanelEditor(pi, CustomEditor, drawing, panel.toggle, caption);
   registerSessions(pi, { profile: getAgentDir(), text: (content) => new Text(content, 0, 0), incomingRenderer: familyMessage("sessions",drawing), panel });
 }

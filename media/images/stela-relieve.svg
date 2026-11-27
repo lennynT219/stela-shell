@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"
+     color="#FEC90A" role="img" aria-labelledby="stela-titulo stela-descripcion" xml:lang="es">
+  <title id="stela-titulo">Stela en reposo · relieve suave</title>
+  <desc id="stela-descripcion">Cinco placas amarillas con un fino canto dorado envuelven un núcleo índigo. Una luz suave desde arriba a la izquierda distingue las placas entre sí. En el centro oscuro, Stela conserva sus ojos amarillos abiertos y su sonrisa.</desc>
+
+  <defs>
+    <!-- Contornos de stela-base.svg. Cada placa se dibuja una sola vez y sirve también de recorte y sombra. -->
+    <path id="stela-nucleo" d="M77 76.5
+      Q116 48 161.5 68.5 Q203 92 199 145.5 Q189 193 136.5 204
+      Q91 211 60 163 Q42 117 77 76.5Z"/>
+    <g id="stela-placas">
+      <path id="stela-placa-norte" d="M75 107
+        C73.8 78.9 85.6 52 106 32.5 C115.9 24.4 129.6 15.2 143 17
+        C167.9 19.3 165.1 52.2 161.5 68.5 C127.7 61.5 92.4 77.4 75 107Z"/>
+      <path id="stela-placa-este" d="M127.5 82
+        C142 72.6 159.2 67.9 176 69 C201.7 70.4 236.9 88.5 239 116.5
+        C239.3 136.5 214.5 143.5 199 145.5 C194.7 110.3 162.5 81.8 127.5 82Z"/>
+      <path id="stela-placa-sureste" d="M178 122
+        C195.4 135.6 207.1 157.6 206.5 179 C206.9 200.1 194.9 237.2 170 239.5
+        C151.2 239.8 143.2 217.7 136.5 204 C170.7 193.1 188.2 153.7 178 122Z"/>
+      <path id="stela-placa-suroeste" d="M157 177
+        C146.4 198.1 128.2 210.6 107 219.5 C86.6 226.9 51.3 233.2 38 210
+        C30.1 191.5 48.3 173.9 60 163 C82.8 191.8 125.9 195.9 157 177Z"/>
+      <path id="stela-placa-oeste" d="M90.5 172
+        C63.6 167.4 41.3 150.7 28.5 129 C18.1 113 9.8 86.1 26 71
+        C40.3 59.3 62.4 69.5 77 76.5 C56.3 106.5 65.3 148 90.5 172Z"/>
+    </g>
+    <clipPath id="c-nucleo"><use href="#stela-nucleo"/></clipPath>
+    <clipPath id="c-norte"><use href="#stela-placa-norte"/></clipPath>
+    <clipPath id="c-este"><use href="#stela-placa-este"/></clipPath>
+    <clipPath id="c-sureste"><use href="#stela-placa-sureste"/></clipPath>
+    <clipPath id="c-suroeste"><use href="#stela-placa-suroeste"/></clipPath>
+    <clipPath id="c-oeste"><use href="#stela-placa-oeste"/></clipPath>
+    <rect id="tinta" width="256" height="256"/>
+  </defs>
+
+  <g id="stela-cuerpo">
+    <!-- Componer cada pieza antes del recorte evita engrosar el borde al reducirla. -->
+    <g clip-path="url(#c-nucleo)" style="isolation:isolate">
+      <use href="#tinta" fill="#372F8C"/>
+      <!-- Hombro iluminado del núcleo y labio interior del alojamiento de la cara. -->
+      <path fill="#5351AB" d="M47 104 Q88 42 159 62 L158 72
+        C120 68 96 89 82 125 C76 139 77 152 80 161 Q52 148 47 104Z"/>
+      <ellipse cx="125.2" cy="132.2" rx="46.2" ry="45.8" fill="#2B275F"/>
+      <ellipse cx="128" cy="136.4" rx="45.6" ry="45.3" fill="#5351AB"/>
+      <use href="#stela-placas" x="3.5" y="5" fill="#2B275F"/>
+    </g>
+
+    <!-- Oro en tres valores. El canto queda al sureste; la luz se concentra en las placas altas. -->
+    <g id="stela-corona" fill="#DEA014">
+      <g clip-path="url(#c-norte)" style="isolation:isolate">
+        <use href="#tinta"/>
+        <use href="#stela-placa-norte" x="-6" y="-7" fill="currentColor"/>
+        <path fill="#FFE367" d="M68.5 97 C85.5 66 102.5 38 144.5 25 Q151.5 23 157.5 23 L161.5 4 H61.5Z"/>
+      </g>
+      <g clip-path="url(#c-este)" style="isolation:isolate">
+        <use href="#tinta"/>
+        <use href="#stela-placa-este" x="-6" y="-8.5" fill="currentColor"/>
+        <path fill="#FFE367" d="M118.5 83 C149.5 75 189.5 70 232.5 102 L242.5 46 H118.5Z"/>
+        <use href="#stela-placa-norte" x="3.5" y="5"/>
+      </g>
+      <g clip-path="url(#c-sureste)" style="isolation:isolate">
+        <use href="#tinta"/>
+        <use href="#stela-placa-sureste" x="-7.5" y="-9" fill="currentColor"/>
+        <use href="#stela-placa-este" x="3.5" y="5"/>
+      </g>
+      <g clip-path="url(#c-suroeste)" style="isolation:isolate">
+        <use href="#tinta"/>
+        <use href="#stela-placa-suroeste" x="-5" y="-7.5" fill="currentColor"/>
+        <path fill="#FFE367" d="M29.5 208 C40.5 188 54.5 178 71 174.5 L60.5 151 H25.5Z"/>
+        <use href="#stela-placa-oeste" x="3.5" y="5"/>
+      </g>
+      <g clip-path="url(#c-oeste)" style="isolation:isolate">
+        <use href="#tinta"/>
+        <use href="#stela-placa-oeste" x="-5" y="-6.5" fill="currentColor"/>
+        <path fill="#FFE367" d="M22.5 131 C21.5 107 27.5 87 42.5 78 C53.5 71 65.5 71 77.5 74 L81.5 52 H7.5 V134Z"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Sin brillo en la cara: los tres rasgos conservan sus coordenadas y su contraste. -->
+  <g id="stela-rostro">
+    <ellipse id="stela-cara" cx="126.5" cy="133.6" rx="43.6" ry="43.1" fill="#2B2C33"/>
+    <g id="stela-ojos" fill="currentColor">
+      <ellipse cx="108" cy="124" rx="6.5" ry="11.5"/>
+      <ellipse cx="145" cy="124" rx="6.5" ry="11.5"/>
+    </g>
+    <path id="stela-boca" d="M115.6 148.7 C119.3 156.5 133.4 156.9 137.2 148.7"
+          fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>
