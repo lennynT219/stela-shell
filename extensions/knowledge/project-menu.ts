@@ -14,6 +14,7 @@ export interface ProjectStatus {
 export interface DraftRequest {
   title: string;
   description: string;
+  previousBody?: string;
 }
 
 export interface Publication {
@@ -30,7 +31,10 @@ export interface ProjectMenuPort {
   draft(input: DraftRequest): Promise<string | undefined>;
   preview(title: string, body: string): Promise<{ path: string; apply(): Promise<Publication> } | undefined>;
   bind(project: ProjectChoice): Promise<Publication>;
+  edit?(project: ProjectChoice): Promise<{ body: string; save(body: string): Promise<EditOutcome> } | undefined>;
 }
+
+type EditOutcome = "updated" | "unchanged" | "updated_scope_changed" | "conflict" | "invalid" | "unsupported" | "save_unconfirmed" | "not_applied";
 
 export interface SourcesMenuPort {
   status(): Promise<ProjectStatus>;
@@ -75,17 +79,50 @@ No lo crees otra vez; selecciona la ficha existente solo después de revisar el 
   }
 }
 
+async function editSheet(ui: Menu, project: ProjectChoice, port: ProjectMenuPort) {
+  const observed = await port.edit?.(project);
+  if (!observed) return;
+  const author = await choose(ui, `Editar ficha · ${project.title}`, [
+    { label: "Editar el texto actual", value: "manual" },
+    { label: "Generar borrador con el modelo activo (ficha, Memory e Historial disponibles)", value: "agent" },
+  ] as const);
+  if (author === undefined) return;
+  let draft: string | undefined;
+  if (author === "agent") {
+    const description = await ui.input("Descripción opcional (se enviará al modelo con el contexto disponible)", "");
+    if (description === undefined) return;
+    draft = await port.draft({ title: project.title, description: description.trim(), previousBody: observed.body });
+    if (!draft) ui.notify("No se obtuvo un borrador. Se conserva el texto actual para editarlo manualmente.", "warning");
+  }
+  const body = await ui.editor("Revisar ficha · español con encabezados en inglés", draft ?? (observed.body.trim() ? observed.body : template));
+  if (body === undefined) return;
+  if (body === observed.body) return ui.notify("La ficha no cambió.", "info");
+  if (!await ui.confirm("Guardar ficha", `${label(project)}\nSe reemplazará solo el texto que acabas de revisar. No se cambiarán el título, la ruta, el vínculo de esta carpeta ni la Memory.`)) return;
+  const result = await observed.save(body);
+  const message: Record<EditOutcome, string> = {
+    updated: "Ficha actualizada.", unchanged: "La ficha no cambió.",
+    updated_scope_changed: "Brain confirmó que guardó la ficha, pero cambió el alcance. Revisa el estado antes de volver a escribir.",
+    conflict: "La ficha o el vínculo cambió durante la edición. No se guardó; vuelve a abrir el menú para revisar la versión actual.",
+    invalid: "Brain rechazó el texto. Revisa los encabezados Summary, Objective y Scope y vuelve a abrir el menú.",
+    unsupported: "Este Brain no admite editar fichas. Usa una versión compatible; no se modificó el archivo.",
+    save_unconfirmed: "No se pudo confirmar el guardado de la ficha. No reintentes: revisa su estado en Brain.",
+    not_applied: "No se aplicó la edición de la ficha. No se reintentó.",
+  };
+  ui.notify(message[result], result === "updated" || result === "unchanged" ? "info" : "warning");
+}
+
 export async function projectMenu(ui: Menu, folderName: string, port: ProjectMenuPort) {
   const current = await port.status();
-  if (current.memory === "unavailable") {
+  const modes: {label: string; value: "select" | "create" | "edit"}[] = [];
+  if (current.memory !== "unavailable") modes.push({ label: "Seleccionar un Project activo…", value: "select" }, { label: "Crear un Project nuevo…", value: "create" });
+  if (current.principal && port.edit) modes.push({ label: "Editar ficha…", value: "edit" });
+  if (!modes.length) {
     ui.notify("Memory no está disponible para verificar el vínculo. No se harán cambios.", "warning");
     return;
   }
-  const mode = await choose(ui, `Proyecto de esta carpeta: ${current.principal?.title ?? "sin vincular"}`, [
-    { label: "Seleccionar un Project activo…", value: "select" },
-    { label: "Crear un Project nuevo…", value: "create" },
-  ] as const);
+  const mode = await choose(ui, `Proyecto de esta carpeta: ${current.principal?.title ?? "sin vincular"}`, modes);
   if (mode === undefined) return;
+  if (mode === "edit" && current.principal) return editSheet(ui, current.principal, port);
   if (mode === "select") {
     const projects = await port.list();
     if (!projects.length) return ui.notify("No hay Projects activos para seleccionar.", "info");

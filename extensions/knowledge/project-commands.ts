@@ -47,7 +47,7 @@ export function registerProjectCommands(pi: ExtensionAPI, env: NodeJS.ProcessEnv
       if (!claim) { ctx.ui.notify("Espera a que termine el trabajo activo antes de abrir este menú.", "warning"); return; }
       try {
         const client = projectClient(ctx.cwd, env);
-        const current = () => claim.valid() && ctx.isIdle() && !ctx.hasPendingMessages() && client.valid();
+        const current = () => claim.valid() && ctx.isProjectTrusted() && ctx.isIdle() && !ctx.hasPendingMessages() && client.valid();
         need(current());
         await run(ctx, client, AbortSignal.any([claim.signal, ...(ctx.signal ? [ctx.signal] : [])]), current);
       } catch { if (claim.valid()) ctx.ui.notify("No se pudo completar la operación. Verifica el ámbito o la compatibilidad de Brain. No hubo reintento automático.", "warning"); }
@@ -55,7 +55,7 @@ export function registerProjectCommands(pi: ExtensionAPI, env: NodeJS.ProcessEnv
     } });
   };
 
-  owned("ss-project", "Elegir o crear el proyecto de Brain vinculado a esta carpeta", async (ctx, brain, signal, current) => {
+  owned("ss-project", "Elegir o crear el proyecto de Brain vinculado a esta carpeta, o editar su ficha", async (ctx, brain, signal, current) => {
     need(current() && !hooks.writesPaused());
     const reservation = reserveProjectAssociation(ctx, brain.authority);
     need(reservation);
@@ -99,9 +99,44 @@ export function registerProjectCommands(pi: ExtensionAPI, env: NodeJS.ProcessEnv
           if (!canRead() || signal.aborted) return;
           // Refuse to generate from a changed baseline; the operator may start a new command.
           if (r.status === "found") need(equal(r.memory, memory));
+          if (input.previousBody !== undefined) {
+            const latest = await brain.call("status", {}, signal);
+            need(canWrite() && !signal.aborted && latest.status === "found" && latest.allow_write &&
+              equal(latest.principal, statusReply.principal) && equal(latest.expected, expected));
+          }
           try { return await draftProject(ctx, input, r.status === "found" ? r : undefined, AbortSignal.any([signal, AbortSignal.timeout(60_000)])); }
           catch { return undefined; }
         },
+        edit: statusReply.allow_write === true ? async selected => {
+          need(canWrite() && !signal.aborted);
+          const r = await brain.call("read", { project_id: selected.id }, signal);
+          need(canWrite() && !signal.aborted && r.status === "found" && equal(r.project, statusReply.principal) &&
+            typeof r.markdown === "string" && typeof r.body === "string");
+          const expected_markdown = r.markdown;
+          // Editing the sheet does not associate or publish Memory. Only the
+          // vault and marker portion of the status baseline enters this write.
+          const { vault_directory, marker, legacy_marker } = expected;
+          let used = false;
+          return { body: r.body, async save(body) {
+            if (used || !canWrite() || signal.aborted) return "not_applied";
+            used = true;
+            const uncertain = () => { hooks.changed(true); return "save_unconfirmed" as const; };
+            try {
+              const result = await brain.call("update_body", {
+                expected_project: r.project, expected: { vault_directory, marker, legacy_marker },
+                expected_markdown, body, human_approved: true,
+              }, signal);
+              switch (result.status) {
+                case "updated":
+                  if (canWrite() && !signal.aborted) return "updated";
+                  hooks.changed(true); return "updated_scope_changed";
+                case "unchanged": case "conflict": case "invalid": case "unsupported": return result.status;
+                case "save_unconfirmed": return uncertain();
+                default: return "not_applied";
+              }
+            } catch { return uncertain(); }
+          } };
+        } : undefined,
         async preview(title, body) {
           need(canWrite() && !signal.aborted);
           const r = await brain.call("preview_create", { title, body }, signal);
