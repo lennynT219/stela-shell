@@ -1,13 +1,10 @@
 import type { CustomEditor, ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { EditorCaption } from "./usage-footer.ts";
-import { FLOAT_FRAMES } from "./mascot-icon.ts";
+import { FLOAT_BANDS, FLOAT_FRAMES } from "./mascot-icon.ts";
 
-// Linger at the ends of the float. Only one trough in two includes a short blink.
-const FLOAT: readonly [frame:number, holdMs:number][] = [
-  [2,200], [1,260], [0,520], [1,260], [2,200], [3,260], [4,520], [3,260],
-  [2,200], [1,260], [0,520], [1,260], [2,200], [3,260], [4,180], [5,140], [4,200], [3,260],
-];
+import { GESTURE_ART } from "./mascot-gesture-art.ts";
+import { mascotMotion, registerMascotRuns, type Pose } from "./mascot-motion.ts";
 
 type Paint = Pick<typeof import("@earendil-works/pi-tui"), "Image" | "getCapabilities" | "getCellDimensions" | "colorToOkhsl" | "okhslColor" | "backgroundAnsi" | "stripTerminalSequences" | "visibleWidth" | "CURSOR_MARKER" | "renderFakeCursor">;
 
@@ -30,9 +27,15 @@ function surfaceInk(theme: Theme, draw: Paint) {
   return ink;
 }
 
-const SPRITE_COLUMNS = 8; // Six Kitty cells with one cell of margin on each side.
+const COMPACT_COLS = 6, LARGE_COLS = 8, LARGE_ROWS = 4;
 const PANEL_LABEL = " [Panel] ";
-type Control = { graphic: boolean; rows: number; cells: string };
+// Both sizes stay inside the same nine-column slot, one column in from the right edge.
+function stamp(mark: string, cols: number) {
+  const left = LARGE_COLS - cols;
+  return " ".repeat(left) + mark + " ".repeat(PANEL_LABEL.length - left);
+}
+type Tile = { rows: number; cells: string; bands?: () => string[] };
+type Control = Tile & { graphic: boolean; large?: Tile };
 type Hit = { x: number; y: number; rows: number };
 type Layout = { width: number; hit?: Hit; draftY: number; count: number; menuY: number; nativeHeight: number };
 
@@ -45,22 +48,35 @@ function draftSurface(body: string[], width: number, control: Control | undefine
   const room = last?.endsWith(" ".repeat(gutter));
   const pad = graphic && (!room || !safeImageRow(last)) ? Math.max(1, rows - spill) : 1;
   const lines = [...Array<string>(pad).fill(blank), ...body, ...Array<string>(pad + spill).fill(blank)];
-  let hit: Hit | undefined;
+  let hit: Hit | undefined, bandOnSpill = false;
   if (control) {
-    const y = graphic ? lines.length - rows : pad + body.length - (room ? 1 : 0);
-    // Pi does not highlight a selection on a Kitty anchor line. Yield that line while
-    // selecting or showing an overlay, keeping the exact text, cursor and row positions.
+    let tile: Tile = control, y = graphic ? lines.length - rows : pad + body.length - (room ? 1 : 0);
+    const large = control.large;
+    if (large) {
+      // Grow UP into existing rows, never by adding padding or moving the footer. Every
+      // covered row must have room, not just the one holding the placement or the cursor.
+      const top = lines.length - large.rows;
+      if (top >= 0 && (large.rows > 1) === !!spill && lines.slice(top).every((s, i) =>
+        s.endsWith(" ".repeat(gutter)) && ((!large.bands && i > 0) || safeImageRow(s)))) {
+        tile = large; y = top;
+      }
+    }
+    // Image anchors bypass Pi's selection highlighting. Yield without changing any row positions.
     if (!(graphic && selecting && y < pad + body.length)) {
-      lines[y] = lines[y].slice(0, -gutter) + control.cells;
-      hit = { x: width - gutter, y, rows };
+      const marks = tile.bands?.() ?? [tile.cells];
+      marks.forEach((mark, i) => { lines[y + i] = lines[y + i].slice(0, -gutter) + mark; });
+      bandOnSpill = !!(spill && tile.bands);
+      hit = { x: width - gutter, y, rows: tile.rows };
     }
   }
-  return { lines, hit, pad, spill };
+  return { lines, hit, pad, spill, bandOnSpill };
 }
 
 /** Add only the Panel hit target. The same editor owns the draft, cursor and history in both layouts. */
-export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor, draw: Paint, toggle: () => void, caption?: EditorCaption) {
-  let stop: (() => void) | undefined;
+export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor, draw: Paint, toggle: () => void,
+  caption?: EditorCaption, peerNeedsAnswer: () => boolean = () => false) {
+  let stop: (() => void) | undefined, repaint: (() => void) | undefined;
+  const run = registerMascotRuns(pi, () => repaint?.());
   pi.on("session_shutdown", () => { stop?.(); stop = undefined; });
   pi.on("session_start", (_event, ctx) => {
     // Don't displace an independently installed editor; the shortcut and command remain available.
@@ -69,27 +85,63 @@ export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor,
     const useSurface = !process.env.NO_COLOR && process.env.TERM !== "dumb";
     ctx.ui.setEditorComponent((tui: EditorHost, theme, kb) => {
       stop?.();
-      let live = true, step = 0, timer: ReturnType<typeof setTimeout> | undefined;
-      const pause = () => { clearTimeout(timer); timer = undefined; };
-      stop = () => { live = false; pause(); };
+      let live = true, until: number | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+      const pause = () => { clearTimeout(timer); timer = undefined; until = undefined; };
+      repaint = () => { if (live) tui.requestRender(); };
+      stop = () => { live = false; pause(); repaint = undefined; };
       const [cursorOpen, cursorClose] = draw.renderFakeCursor("\0").split("\0");
       // Image lines bypass Pi's terminal normalization. Keep tabs, Thai/Lao AM and
       // any non-editor control sequence on an ordinary text line.
       const safeImageRow = (line: string) => !/[\p{Cc}\u0e33\u0eb3]/u.test(
         line.replace(draw.CURSOR_MARKER, "").replace(cursorOpen, "").replace(cursorClose, ""));
+      const icon = (png: string, cols: number, rows: number) => new draw.Image(png, "image/png", { fallbackColor: s => s }, { maxWidthCells: cols, maxHeightCells: rows });
+      type Images = { compact: ReturnType<typeof icon>; large: ReturnType<typeof icon>; strips?: ReturnType<typeof icon>[] };
       const editor = new class extends Base {
-        private icons = FLOAT_FRAMES.map(png => new draw.Image(png,"image/png",{fallbackColor:s=>s},{maxWidthCells:6,maxHeightCells:3}));
-        private nextFrame() {
-          if (!live || tui.getFocusedComponent?.() !== this) { pause(); return; }
-          if (timer !== undefined) return;
-          timer = setTimeout(() => {
-            timer = undefined;
-            if (!live || tui.getFocusedComponent?.() !== this) return;
-            step = (step + 1) % FLOAT.length;
-            tui.requestRender();
-          }, FLOAT[step][1]);
-          timer.unref();
+        private motion = mascotMotion();
+        private shown: Pose = "sleep";
+        private art = new Map<Pose, Images>();
+        private tile(frame: Pose) {
+          let tile = this.art.get(frame);
+          if (!tile) {
+            const png = typeof frame === "number" ? FLOAT_FRAMES[frame] : GESTURE_ART[frame][0];
+            tile = { compact: icon(png, COMPACT_COLS, 3), large: icon(png, LARGE_COLS, LARGE_ROWS) };
+            this.art.set(frame, tile);
+          }
+          return tile;
         }
+        private bandMarks(frame: Pose, tile: Images) {
+          tile.strips ??= (typeof frame === "number" ? FLOAT_BANDS[frame] : GESTURE_ART[frame].slice(1)).map(png => icon(png, LARGE_COLS, 1));
+          return tile.strips.map(part => stamp(part.render(LARGE_COLS + 2)[0], LARGE_COLS));
+        }
+        private nextFrame() {
+          if (!live || tui.getFocusedComponent?.() !== this) { pause(); return this.shown; }
+          const { pose, next } = this.motion.frame(run, peerNeedsAnswer());
+          if (next !== until) {
+            pause();
+            if (next !== undefined) {
+              until = next;
+              timer = setTimeout(() => {
+                timer = undefined; until = undefined;
+                if (live && tui.getFocusedComponent?.() === this) tui.requestRender();
+              }, Math.max(1, Math.ceil(next - performance.now())));
+              timer.unref();
+            }
+          }
+          return this.shown = pose;
+        }
+        private editing = false;
+        private observeDraft(typed: boolean) {
+          if (!live || !imagesEnabled) return;
+          const pos = this.getCursor();
+          this.motion.draft(pos.col > 0 || pos.line > 0 || this.getText().length > 0, typed);
+        }
+        handleInput(data: string) {
+          this.editing = true;
+          try { super.handleInput(data); } // Pi handles shortcuts, paste, submission and editing without interception.
+          finally { this.editing = false; this.observeDraft(true); }
+        }
+        setText(text: string) { super.setText(text); if (!this.editing) this.observeDraft(false); }
+        insertTextAtCursor(text: string) { super.insertTextAtCursor(text); if (!this.editing) this.observeDraft(false); }
         private layout?: Layout;
         private pressedAt?: Hit;
         private bottom = "";
@@ -120,10 +172,21 @@ export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor,
           let control: Control | undefined;
           if (imagesEnabled && width >= 20 && draw.getCapabilities().images === "kitty") {
             const dims = draw.getCellDimensions(), cells = `${dims.widthPx}:${dims.heightPx}`;
-            if (cells !== this.cells) { this.cells = cells; for (const icon of this.icons) icon.invalidate(); }
-            this.nextFrame();
-            const tile = this.icons[FLOAT[step][0]].render(SPRITE_COLUMNS);
-            control = { graphic: true, rows: tile.length, cells: "  " + tile[0] + " ".repeat(SPRITE_COLUMNS - 1) };
+            if (cells !== this.cells) {
+              this.cells = cells;
+              for (const { compact, large, strips } of this.art.values()) {
+                compact.invalidate(); large.invalidate(); strips?.forEach(part => part.invalidate());
+              }
+            }
+            const frame = this.nextFrame(), tile = this.tile(frame);
+            // Pi's Image.render reserves two columns from the supplied width.
+            const small = tile.compact.render(COMPACT_COLS + 2), big = tile.large.render(LARGE_COLS + 2);
+            control = { graphic: true, rows: small.length, cells: stamp(small[0], COMPACT_COLS) };
+            const regular = tui.mode === "regular";
+            // Regular Pi writes top-to-bottom; a later text row can erase a multi-row Kitty
+            // placement. Draw independent one-row slices there, never over a sibling component.
+            if (!regular || (big.length === LARGE_ROWS && (usage === undefined || safeImageRow(draw.stripTerminalSequences(usage)))))
+              control.large = { rows: big.length, cells: stamp(big[0], LARGE_COLS), bands: regular ? () => this.bandMarks(frame, tile) : undefined };
           } else {
             pause();
             if (width >= 10) control = { graphic: false, rows: 1, cells: ctx.ui.theme.fg("accent", PANEL_LABEL) };
@@ -133,9 +196,11 @@ export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor,
           let below: string[] = [];
           if (usage !== undefined) {
             // Same full-width footer string; don't truncate it again to make the mascot fit.
-            if (surface.spill && !tail.length && !menu.length && draw.visibleWidth(usage) <= width - PANEL_LABEL.length)
-              body[body.length - 1] = usage;
-            else below = [usage];
+            const n = draw.visibleWidth(usage);
+            if (surface.spill && !tail.length && !menu.length && n <= width - PANEL_LABEL.length) {
+              const end = body.length - 1;
+              body[end] = surface.bandOnSpill ? usage + body[end].slice(n) : usage;
+            } else below = [usage];
           }
           this.layout = { width, hit: surface.hit && { ...surface.hit, y: head.length + surface.hit.y },
             draftY: head.length + surface.pad, count: draft.length, menuY: head.length + body.length + tail.length, nativeHeight: native.length };

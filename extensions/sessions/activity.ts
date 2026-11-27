@@ -134,6 +134,7 @@ export function registerActivity(pi: ExtensionAPI, drawing: Drawing, isNativeDia
   return {
     toggle,
     active: (ctx: ExtensionContext) => owns(ctx) && !!view,
+    needsAnswer: () => state.questions.length > 0,
     bind(ctx: ExtensionContext, transport: SessionTransport) {
       stopPeers(); if (!owns(ctx) || !transport.questionFor) return;
       watching = watchQuestions(transport as AttentionTransport, qs => { state.questions = qs; view?.refresh(); },
