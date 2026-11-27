@@ -5,12 +5,20 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Question } from "./attention.ts";
 import { identifier, newId, type Envelope, type PeerInfo } from "./messages.ts";
-import { answer, boundedString, decode, encode, MAX_PEERS, IO_DEADLINE_MS, presence, publicPeer, receipt, responseKind, seal, sendBounded,
+import { answer, boundedString, decode, encode, MAX_PEERS, MAX_SCAN_ENTRIES, MAX_OUTBOUND, IO_DEADLINE_MS, presence, publicPeer, receipt, responseKind, seal, sendBounded,
   type Payload, type Presence, type Receive, type Receipt, type SessionTransport } from "./protocol.ts";
 
 export const WINDOWS_SESSIONS_HELPER = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../../native/windows-sessions/target/release/stela-sessions.exe");
 export const WINDOWS_SESSIONS_BUILD = "cargo build --locked --release --manifest-path native/windows-sessions/Cargo.toml";
 const MAX_BRIDGE = 140 * 1024, MAX_PENDING = 32, MAX_BUFFERED_WRITE = 2 * 1024 * 1024;
+const DISCOVERY_DEADLINE_MS = 12_000;
+function definitelyAbsent(pid: number): boolean {
+  // Signal 0 sends nothing. Pass only positive signed PIDs that Node accepts.
+  // Access errors and reused PIDs are not absence or proof of identity.
+  if (pid <= 0 || pid > 0x7fff_ffff) return false;
+  try { process.kill(pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+  return false;
+}
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const integer = (value: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(value); return b; };
 function number(bytes: Buffer): number { if (bytes.length !== 4) throw new Error("Invalid native integer."); return bytes.readUInt32LE(); }
@@ -192,22 +200,40 @@ export class WindowsTransport implements SessionTransport {
   }
   async list(signal?: AbortSignal): Promise<PeerInfo[]> {
     signal?.throwIfAborted(); if (this.closed) throw new Error("Session transport closed.");
-    const ids = await this.bridge.call(4,[],signal); const candidates: Presence[] = [];
-    for (const id of ids) {
+    const budget = new AbortController(), deadline = performance.now() + DISCOVERY_DEADLINE_MS;
+    const scoped = signal ? AbortSignal.any([signal, budget.signal]) : budget.signal;
+    const timer = setTimeout(() => budget.abort(), DISCOVERY_DEADLINE_MS);
+    const check = () => {
       signal?.throwIfAborted();
-      try { candidates.push(await this.readPresence(identifier(utf8.decode(id)))); } catch { /* unsafe/stale records never prove reachability */ }
-      if (candidates.length > MAX_PEERS) throw new Error("Peer candidate limit reached; review stale records manually.");
-    }
-    const result: PeerInfo[] = [];
-    for (let offset = 0; offset < candidates.length; offset += 4) {
-      signal?.throwIfAborted();
-      await Promise.all(candidates.slice(offset,offset+4).map(async (peer) => {
-        try { if ((await this.request(peer,{kind:"ping"},signal)).accepted) result.push(publicPeer(peer)); } catch { /* unconfirmed != live */ }
-      }));
-    }
-    signal?.throwIfAborted(); this.bridge.assertOpen();
-    if (this.closed) throw new Error("Session transport closed.");
-    return result.sort((a,b) => a.id.localeCompare(b.id));
+      if (this.closed) throw new Error("Session transport closed.");
+      if (budget.signal.aborted || performance.now() >= deadline) throw new Error("Windows session discovery deadline exceeded; discovery incomplete.");
+      this.bridge.assertOpen();
+    };
+    try {
+      const ids = await this.bridge.call(4, [], scoped);
+      check();
+      if (ids.length > MAX_SCAN_ENTRIES) throw new Error("Presence scan limit reached; review stale records manually.");
+      const result: PeerInfo[] = [];
+      for (let offset = 0; offset < ids.length; offset += MAX_OUTBOUND) {
+        const peers = await Promise.all(ids.slice(offset, offset + MAX_OUTBOUND).map(async id => {
+          check();
+          let peer: Presence;
+          try { peer = await this.readPresence(identifier(utf8.decode(id)), scoped); }
+          catch { check(); return; /* Unsafe or unavailable records never prove reachability. */ }
+          check();
+          if (definitelyAbsent(peer.pid)) return;
+          try { if ((await this.request(peer, {kind:"ping"}, scoped)).accepted) return publicPeer(peer); }
+          catch { check(); /* A failed or unconfirmed probe is not proof of reachability. */ }
+        }));
+        check();
+        for (const peer of peers) if (peer) result.push(peer);
+        if (result.length > MAX_PEERS) throw new Error("Reachable peer limit reached (more than 32 authenticated sessions).");
+      }
+      return result.sort((a,b) => a.id.localeCompare(b.id));
+    } catch (error) {
+      check(); // Do not disguise a deadline, cancellation or dead bridge as an empty list.
+      throw error;
+    } finally { clearTimeout(timer); budget.abort(); }
   }
   async close(): Promise<void> { this.closed = true; await this.bridge.close(); }
 }

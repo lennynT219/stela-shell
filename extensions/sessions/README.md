@@ -146,7 +146,7 @@ Human-only controls:
 | Ordinary conversation | 8 hops, at most 10 minutes from its root |
 | Explicit work context | Same 8-hop/activation budgets; fixed default 30 minutes, allowed 10–60; each message ≤10 minutes |
 | Transport frame | 128 KiB including worst-case JSON escaping and encrypted hex payload |
-| Presence record / enumeration | 4 KiB per record, 128 directory entries, 32 candidate peers |
+| Presence record / enumeration | 4 KiB per record, 128 directory entries; 32 candidates on POSIX or 32 authenticated, reachable peers on Windows |
 | Connections | 8 inbound and 4 outbound per activation |
 | Read/connect/ACK operation | Absolute 2-second deadline, including idle clients; a work send shares one budget across negotiation + send |
 
@@ -175,7 +175,8 @@ Windows 10+ uses `native/windows-sessions/`, one private bridge process per prin
 - The pipe namespace hashes the current account SID and canonical profile volume/file identity, not just a lowercased path. Aliases to the same directory share a namespace; activation IDs are independently random. Windows endpoint derivation from an unvalidated string path is refused.
 - Named pipes use an explicit DACL, first-instance collision protection and `PIPE_REJECT_REMOTE_CLIENTS`. The native bridge verifies the client's effective SID/process and the server's SID/PID. The presence PID names the **native listener**, not Pi; Pi owner lifetime is monitored separately with an opened process handle. The existing per-activation encryption/HMAC remains required.
 - Private stdio framing is versioned and capped at 140 KiB, with 32 pending Node requests, bounded buffered writes and 8 incoming/4 outgoing pipe connections. Wire operations retain an absolute two-second deadline, including partial/idle clients and admission wait. There is no general model-callable native RPC or arbitrary endpoint/path operation.
-- Normal shutdown deletes only the originally opened own record by handle. EOF or owner death ends the bridge; native crashes/forced termination can leave private stale records, which discovery must probe and never ambiguously delete. Bridge failure makes operations unavailable, with no automatic restart/retry. Stop/start is an explicit operator action.
+- Windows discovery skips a validated presence record only as a process prefilter when its recorded native PID is reported nonexistent. A present or ambiguous PID still needs an authenticated ping; a PID is not proof of identity. The 32-peer cap counts accepted, authenticated replies, not files. Enumeration still stops beyond 128 directory entries. Discovery allows up to four probes at once and has a 12-second overall deadline covering enumeration, reads and probes. Cancellation, timeout of the scan, or bridge failure does not return a partial list as healthy.
+- Normal shutdown deletes only the originally opened own record by handle. EOF or owner death ends the bridge; native crashes/forced termination can leave private stale records. Discovery never deletes or moves them. If the directory scan limit is reached, it still requires operator review. Bridge failure makes operations unavailable, with no automatic restart/retry. Stop/start is an explicit operator action.
 
 Missing, unlaunchable or incompatible artifacts fail closed. Runtime never downloads, compiles, elevates, runs an ACL-repair command or falls back to unprotected Node pipes. Diagnostics exclude capabilities/messages. This is not a sandbox against hostile same-account/admin code, trusted extensions or a compromised host.
 

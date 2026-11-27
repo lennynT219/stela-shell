@@ -61,6 +61,54 @@ test("Windows protected discovery, duplicate/correlated replies, Unicode and esc
   assert.equal(record.pid,b.bridge.pid);
   assert.doesNotMatch(JSON.stringify(a.transport.info),/secret|namespace|endpoint/);
 });
+test("Windows discovery lists the other three sessions with 33 stale native records and leaves all records intact",{...windows,timeout:45_000},async(t)=>{
+  const {profile}=workspace(t), root=join(profile,"stela-sessions");
+  const [own,...others]=await Promise.all(["editor","BrainAgent","docs","review"].map(name=>peer(t,profile,name)));
+  for(let i=0;i<33;i++) {
+    const stale=await peer(t,profile,`stale ${i+1}`);
+    assert.equal(stale.bridge.child.kill("SIGKILL"),true);
+    await stale.bridge.exited;
+  }
+  const before=readdirSync(root).sort();
+  assert.equal(before.length,37);
+  const listed=await own.transport.list();
+  assert.deepEqual(listed,others.map(p=>p.transport.info).sort((a,b)=>a.id.localeCompare(b.id)));
+  assert.deepEqual(readdirSync(root).sort(),before);
+});
+
+test("Windows discovery errors when 33 peers acknowledge the probe, not merely when 33 records exist",async()=>{
+  const candidates=Array.from({length:33},()=>newId());
+  let probes=0;
+  const list=Reflect.apply(WindowsTransport.prototype.list,{
+    closed:false,
+    bridge:{call:async()=>candidates.map(id=>Buffer.from(id)),assertOpen(){}},
+    readPresence:async(id:string)=>({id,pid:process.pid,sessionId:id,name:"fixture",cwd:"fixture"}),
+    request:async()=>{probes++;return {accepted:true};},
+  },[]);
+  await assert.rejects(list,/Reachable peer limit/);
+  assert.equal(probes,33);
+});
+
+test("Windows discovery reports an incomplete result when the overall deadline cancels a probe",async(t)=>{
+  t.mock.timers.enable({apis:["setTimeout"]});
+  const reachable=newId(), stalled=newId(), probing=Promise.withResolvers<void>();
+  const list=Reflect.apply(WindowsTransport.prototype.list,{
+    closed:false,
+    bridge:{call:async()=>[Buffer.from(reachable),Buffer.from(stalled)],assertOpen(){}},
+    readPresence:async(id:string)=>({id,pid:process.pid,sessionId:id,name:"fixture",cwd:"fixture"}),
+    request:async(peer:{id:string},_payload:unknown,signal:AbortSignal)=>{
+      if(peer.id===reachable) return {accepted:true};
+      probing.resolve();
+      return new Promise((_resolve,reject)=>signal.addEventListener("abort",()=>reject(signal.reason),{once:true}));
+    },
+  },[]);
+  // Attach the rejection handler before advancing the clock, including if a regression rejects earlier.
+  const checked=assert.rejects(list,/discovery incomplete/i);
+  await Promise.race([probing.promise,checked]);
+  t.mock.timers.tick(12_000);
+  await checked;
+});
+
 test("Windows canonical profile aliases share a namespace; distinct profiles stay isolated",windows,async(t)=>{
   const {scratch,profile}=workspace(t), other=join(scratch,"other");mkdirSync(other);
   const a=await peer(t,profile,"a"), b=await peer(t,profile.replace(/^[A-Z]/,s=>s.toLowerCase()),"b"), c=await peer(t,other,"c");

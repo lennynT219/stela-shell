@@ -174,7 +174,7 @@ export function registerSessions(pi: ExtensionAPI, dependencies: Dependencies): 
   pi.registerTool({
     name: "ss_sessions_list", label: "Sesiones",
     renderCall: callRenderer("ss_sessions_list", "Sesiones", dependencies.text),
-    description: "Discover currently reachable PRIMARY stela-shell activations in this local profile (up to 32 candidates). No helpers, remote sessions or saved-session transcript search. IDs identify live activations, not display names.",
+    description: "Discover currently reachable PRIMARY stela-shell activations in this local profile (up to 32 peers; on POSIX the cap applies to candidates). No helpers, remote sessions or saved-session transcript search. IDs identify live activations, not display names.",
     promptSnippet: "Discover reachable local primary stela-shell sessions",
     promptGuidelines: ["Use ss_sessions_list for useful coordination or delegated primary-session work, not task-status polling. Presence alone is not a task request; concrete ss_sessions_send requests are actionable under the user's collaboration policy without granting new permissions."],
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
