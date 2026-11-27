@@ -193,7 +193,7 @@ export function activityView(tui: Host, theme: Theme, draw: Drawing, state: View
   }, false);
   widget.handleInput = keyInput;
   return {
-    focusList,
+    focusList, isDocked,
     toggleCapabilitiesFromEditor() {
       const from = tui.getFocusedComponent?.();
       if (typeof (from as {getExpandedText?: unknown} | null)?.getExpandedText === "function") toggleCapabilities();

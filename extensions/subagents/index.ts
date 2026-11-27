@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { REQUEST_TASKS, TASKS_EVENT, type TaskSignal } from "../activity-events.ts";
+import { HELPER_WAIT_EVENT, REQUEST_TASKS, TASKS_EVENT, type HelperWaitSignal, type TaskSignal } from "../activity-events.ts";
 import { callRenderer, messageRenderer, type MakeText } from "../presentation.ts";
 import type { ExtensionAPI, ExtensionContext, MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { TaskQueue, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, executionTimeoutSeconds, concurrencyLimit, validateAssignment, type Task } from "./tasks.ts";
@@ -129,6 +129,21 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
   let queue: TaskQueue | undefined;
   let owner: ExtensionContext | undefined;
   let generation = 0;
+  let clearWait: (() => void) | undefined;
+  // Visual lifetime only. Never wait on the display, transmit task contents, or change the boundary proposal.
+  const showWait = (ctx: ExtensionContext, signal?: AbortSignal) => {
+    clearWait?.();
+    const owner = { manager: ctx.sessionManager, id: ctx.sessionManager.getSessionId(), span: Symbol("helper-wait") };
+    const publish = (waiting: boolean) => {
+      try { pi.events.emit(HELPER_WAIT_EVENT, { ...owner, waiting } satisfies HelperWaitSignal); } catch { /* Optional UI. */ }
+    };
+    const end = () => {
+      if (clearWait !== end) return;
+      clearWait = undefined; signal?.removeEventListener("abort", end); publish(false);
+    };
+    clearWait = end; signal?.addEventListener("abort", end, { once: true }); publish(true);
+    return end;
+  };
 
   let legacyWidget = false, historical = 0;
   const updateWidget = () => {
@@ -146,7 +161,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
   };
   const owns = (ctx: ExtensionContext) => owner?.sessionManager === ctx.sessionManager && owner?.sessionManager.getSessionId() === ctx.sessionManager.getSessionId();
   const start = async (_event: unknown, ctx: ExtensionContext) => {
-    generation++;
+    generation++; clearWait?.();
     const old = queue;
     owner = undefined;
     queue = undefined;
@@ -157,7 +172,7 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
     updateWidget();
   };
   const shutdown = async () => {
-    generation++;
+    generation++; clearWait?.();
     const old = queue;
     owner?.ui.setWidget(WIDGET, undefined);
     owner = undefined;
@@ -209,9 +224,12 @@ export function registerSubagents(pi: ExtensionAPI, dependencies: Dependencies =
   pi.on("agent_before_settle", async (event, ctx) => {
     if (!owns(ctx) || !queue || event.outcome !== "completed") return;
     const current = queue;
-    const version = generation;
-    // No provider polling. Independent parent work has finished; wait on child completion events.
-    await current.waitForIdle(ctx.signal);
+    const version = generation, signal = ctx.signal;
+    // Only this await actually holds the parent for its helpers. Admission, task-count changes,
+    // agent_end and a proposed continuation say nothing about independently running parent work.
+    const hide = ctx.mode === "tui" && ctx.hasUI && pi.events && !signal?.aborted && current.hasWork() ? showWait(ctx, signal) : undefined;
+    try { await current.waitForIdle(signal); }
+    finally { hide?.(); }
     if (ctx.signal?.aborted || generation !== version || queue !== current || !owns(ctx)) return;
     return appendResults(event.entries, current, ctx);
   });

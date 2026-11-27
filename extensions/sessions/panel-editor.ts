@@ -74,7 +74,7 @@ function draftSurface(body: string[], width: number, control: Control | undefine
 
 /** Add only the Panel hit target. The same editor owns the draft, cursor and history in both layouts. */
 export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor, draw: Paint, toggle: () => void,
-  caption?: EditorCaption, peerNeedsAnswer: () => boolean = () => false) {
+  caption?: EditorCaption, notices?: { needsAnswer(): boolean; tasksOnRight(): boolean }) {
   let stop: (() => void) | undefined, repaint: (() => void) | undefined;
   const run = registerMascotRuns(pi, () => repaint?.());
   pi.on("session_shutdown", () => { stop?.(); stop = undefined; });
@@ -115,7 +115,7 @@ export function registerPanelEditor(pi: ExtensionAPI, Base: typeof CustomEditor,
         }
         private nextFrame() {
           if (!live || tui.getFocusedComponent?.() !== this) { pause(); return this.shown; }
-          const { pose, next } = this.motion.frame(run, peerNeedsAnswer());
+          const { pose, next } = this.motion.frame(run, notices?.needsAnswer() ?? false, !!run.helperWait && !!notices?.tasksOnRight());
           if (next !== until) {
             pause();
             if (next !== undefined) {
