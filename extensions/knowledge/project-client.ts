@@ -5,7 +5,8 @@ import { resolveExecutable, selectExecutable } from "../memory/executable.ts";
 import { parse, stringify, uuid, type ObjectValue, type Value } from "../memory/protocol.ts";
 import type { ProjectChoice } from "./project-menu.ts";
 
-export type ProjectOperation = "status" | "list" | "draft_context" | "preview_create" | "bind" | "create_and_bind";
+export type ProjectOperation = "status" | "list" | "read" | "draft_context" | "preview_create" | "bind" | "create_and_bind" | "update_body";
+const DOCUMENT_BYTES = 512 * 1024;
 export type ProjectCall = (op: ProjectOperation, args: ObjectValue, signal: AbortSignal) => Promise<ObjectValue>;
 export const record = (value: unknown): value is ObjectValue => value !== null && typeof value === "object" && !Array.isArray(value);
 const exact = (r: ObjectValue, ...keys: string[]) => Object.keys(r).length === keys.length && keys.every(k => Object.hasOwn(r, k));
@@ -17,7 +18,7 @@ export function choice(v: Value): ProjectChoice {
   if (!project(v)) throw new Error("Invalid Project description");
   return { id: String(v.project_id), title: String(v.title), path: String(v.path) };
 }
-const isWrite = (op: ProjectOperation) => op === "bind" || op === "create_and_bind";
+const isWrite = (op: ProjectOperation) => op === "bind" || op === "create_and_bind" || op === "update_body";
 const baseline = (v: unknown) => record(v) && exact(v, "vault_directory", "marker", "legacy_marker", "memory") &&
   bounded(v.vault_directory, 64 * 1024) && !!v.vault_directory && !v.vault_directory.includes("\0") &&
   [v.marker, v.legacy_marker].every(x => x === null || bounded(x, 8 * 1024)) && record(v.memory) && typeof v.memory.status === "string";
@@ -55,7 +56,7 @@ export function decodeProject(output: Uint8Array, requestId: string, op: Project
     v.path === destination.path && v.title === destination.title && (op !== "bind" || v.project_id === args.project_id);
   if (r.status === "partial" && (Object.hasOwn(r, "project") || Object.hasOwn(r, "project_reserved") ||
       Object.hasOwn(r, "project_created") || Object.hasOwn(r, "notes_created"))) {
-    if (!isWrite(op) || !exact(r, "status", "project_created", "project_reserved", "notes_created", "project", "reason", "message") ||
+    if ((op !== "bind" && op !== "create_and_bind") || !exact(r, "status", "project_created", "project_reserved", "notes_created", "project", "reason", "message") ||
         !matches(r.project) || ![r.project_created, r.project_reserved, r.notes_created].every(v => typeof v === "boolean") ||
         (r.project_created && !r.project_reserved) || (op === "bind" && (r.project_created || r.project_reserved)) ||
         !bounded(r.reason, 4096) || !bounded(r.message, 4096)) return invalid();
@@ -76,6 +77,12 @@ export function decodeProject(output: Uint8Array, requestId: string, op: Project
   } else if (op === "list") {
     if (!exact(r, "status", "projects") || r.status !== "listed" || !Array.isArray(r.projects) || r.projects.length > 1024 ||
         !r.projects.every(project) || new Set(r.projects.map(p => p.project_id)).size !== r.projects.length) return invalid();
+  } else if (op === "read") {
+    if (!exact(r, "status", "project", "markdown", "body") || r.status !== "found" || !project(r.project) ||
+        r.project.project_id !== args.project_id || !bounded(r.markdown, DOCUMENT_BYTES) || !bounded(r.body, DOCUMENT_BYTES) ||
+        r.markdown.length <= r.body.length || !r.markdown.endsWith(r.body)) return invalid();
+  } else if (op === "update_body") {
+    if (!exact(r, "status", "project") || !["updated", "unchanged"].includes(String(r.status)) || !matches(r.project)) return invalid();
   } else if (op === "draft_context") {
     if (!exact(r, "status", "memory", "history") || r.status !== "found" || !record(r.memory) || typeof r.memory.status !== "string" || !history(r.history)) return invalid();
   } else if (op === "preview_create") {
